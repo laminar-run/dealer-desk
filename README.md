@@ -79,6 +79,8 @@ The response must contain `active: true` and `deadlineAt` as epoch milliseconds.
 Network validation runs outside Tk; the UI thread checks the deadline again immediately before creating the dialog.
 The sender independently verifies the visible dialog titled `DealerDesk 98 - Critical Application Error` for that PID.
 There is no receipt or automatic retry after an unknown outcome.
+An in-memory map prevents dispatching the same attempt again until its deadline.
+A cancellation after final validation can race with an already accepted UI effect; accepted work may finish.
 
 Startup deletes abandoned request and claim files before advertising readiness.
 Shutdown removes readiness only if it still belongs to the current process.

@@ -33,6 +33,12 @@ def test_claim_verifies_off_thread_then_creates_dialog_on_poll(receiver, monkeyp
     receiver.poll()
     effect.assert_called_once_with(receiver.root, immediate=True)
     assert not list(receiver.directory.iterdir())
+    path.write_text(json.dumps(payload))
+    receiver.poll()
+    receiver.results.put(receiver.results.get(timeout=2))
+    receiver.poll()
+    effect.assert_called_once_with(receiver.root, immediate=True)
+    assert not list(receiver.directory.iterdir())
 
 
 def test_rejects_wrong_target_and_checks_deadline_at_effect(receiver, monkeypatch):

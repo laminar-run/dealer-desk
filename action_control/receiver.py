@@ -34,6 +34,7 @@ class Receiver:
         self.results = queue.Queue()
         self.busy = False
         self.closed = False
+        self.dispatched = {}
 
     def verify(self, request):
         if set(request) != {"attemptId", "token", "action", "pid"}:
@@ -62,8 +63,12 @@ class Receiver:
                 pass
             else:
                 self.busy = False
+                now = time.time() * 1000
+                self.dispatched = {attempt: expiry for attempt, expiry in self.dispatched.items() if now < expiry}
+                attempt = path.name.removesuffix(".request.claimed")
                 try:
-                    if deadline is not None and time.time() * 1000 < deadline:
+                    if deadline is not None and time.time() * 1000 < deadline and attempt not in self.dispatched:
+                        self.dispatched[attempt] = deadline
                         from chaos.scenarios import scenario_critical_error
                         scenario_critical_error(self.root, immediate=True)
                 finally:
