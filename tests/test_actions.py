@@ -4,6 +4,7 @@ import threading
 import time
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4
+from urllib.error import HTTPError
 
 import pytest
 from action_control.receiver import ACTION, Receiver, start_test_inbox
@@ -53,6 +54,10 @@ def test_rejects_wrong_target_and_checks_deadline_at_effect(receiver, monkeypatc
     assert receiver.verify(payload) > time.time() * 1000
     sent = opener.open.call_args.args[0]
     assert sent.get_header("Authorization") == "Bearer secret"
+    for status in ({"active": False, "deadlineAt": time.time() * 1000 + 10000}, {"active": True, "deadlineAt": time.time() * 1000 - 1}):
+        opener.open.return_value.__enter__.return_value.read.return_value = json.dumps(status).encode()
+        with pytest.raises(ValueError, match="inactive or expired"):
+            receiver.verify(payload)
     effect = Mock()
     monkeypatch.setattr("chaos.scenarios.scenario_critical_error", effect)
     path = receiver.directory / "expired.claimed"
@@ -67,7 +72,7 @@ def test_authentication_failure_is_consumed_without_effect(receiver, monkeypatch
     payload = request(receiver)
     path = receiver.directory / f'{payload["attemptId"]}.request.claimed'
     path.write_text(json.dumps(payload))
-    receiver.verify = Mock(side_effect=OSError("unavailable"))
+    receiver.verify = Mock(side_effect=HTTPError(receiver.origin, 401, "Unauthorized", {}, None))
     effect = Mock()
     monkeypatch.setattr("chaos.scenarios.scenario_critical_error", effect)
     receiver.process(path)

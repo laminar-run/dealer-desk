@@ -85,5 +85,5 @@ A cancellation after final validation can race with an already accepted UI effec
 Startup deletes abandoned request and claim files before advertising readiness.
 Shutdown removes readiness only if it still belongs to the current process.
 A crash can leave readiness behind; the next startup replaces stale readiness under the session mutex.
-Requests from earlier processes cannot execute in future runs.
+Startup removes files left by earlier runs; PID-only targeting cannot distinguish a delayed new publication if Windows reuses that PID while its attempt token is still active.
 The test environment must protect the configured origin and local session files from untrusted writers.
