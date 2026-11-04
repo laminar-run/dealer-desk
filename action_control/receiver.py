@@ -66,6 +66,7 @@ class Receiver:
         self.registration = registration
         self.results = queue.Queue()
         self.busy = False
+        self.pipe_unavailable = False
         path = Path(os.environ.get('ProgramW6432', os.environ.get('ProgramFiles', r'C:\Program Files'))) / 'MinicorDesktopService' / 'sdk' / 'injected_actions.py'
         spec = importlib.util.spec_from_file_location('injected_actions', path)
         module = importlib.util.module_from_spec(spec)
@@ -100,6 +101,7 @@ class Receiver:
             return outcome(request_id, "failed", str(exc) or type(exc).__name__)
 
     def poll(self):
+        delay = 100
         try:
             try:
                 message, response, error = self.results.get_nowait()
@@ -108,8 +110,13 @@ class Receiver:
             else:
                 self.busy = False
                 if error:
-                    logging.warning("Injected action pipe unavailable: %s", error)
-                elif message['op'] == 'claim_request':
+                    if not self.pipe_unavailable:
+                        logging.warning("Injected action pipe unavailable: %s", error)
+                    self.pipe_unavailable = True
+                    delay = 1000
+                    return
+                self.pipe_unavailable = False
+                if message['op'] == 'claim_request':
                     request = response.get('request')
                     if request is not None:
                         result = self.execute(request)
@@ -120,7 +127,7 @@ class Receiver:
             if not self.busy:
                 self.call({'op': 'claim_request', 'target': self.registration['target']})
         finally:
-            self.root.after(100, self.poll)
+            self.root.after(delay, self.poll)
 
 
 def start_installed(root):

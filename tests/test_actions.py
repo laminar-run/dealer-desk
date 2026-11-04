@@ -57,5 +57,7 @@ def test_failed_claim_keeps_polling(receiver):
     result = receiver.results.get(timeout=2)
     receiver.results.put(result)
     receiver.poll()
+    receiver.root.after.assert_called_with(1000, receiver.poll)
+    receiver.poll()
     assert isinstance(receiver.results.get(timeout=2)[2], TimeoutError)
     assert receiver.client.claim_request.call_count == 2

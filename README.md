@@ -83,7 +83,10 @@ Remove the registration file to uninstall the action, then restart DealerDesk.
 MDS advertises installed definitions on its next heartbeat, whether or not DealerDesk is running.
 DealerDesk claims requests from the local `MinicorInjectedActions-<Windows session ID>` named pipe and reports each outcome to the same server.
 The client checks that the pipe server runs as the same Windows user in the same session.
-Pipe calls run outside the Tk thread with a three-second timeout, while the dialog itself is created on the Tk thread.
+Pipe calls run outside the Tk thread; the MDS SDK sets the three-second exchange timeout for claims and reports.
+DealerDesk creates the dialog on the Tk thread.
+MDS checks the deadline before handing out a claim and accepts reports only before that deadline.
+Once a request is claimed, its deadline cannot interrupt Tk: a dialog can still appear after its caller times out.
 The action ID is `dealerdesk.critical-error`, version 1, with empty `{}` parameters.
 It reports completion after the critical error dialog has been created.
 A timeout or interrupted report can leave the outcome unknown.
