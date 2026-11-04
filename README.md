@@ -74,7 +74,7 @@ Only one test inbox owner may run in a Windows session.
 DealerDesk publishes `ready.json` containing `{ "pid": <process ID> }` under `%LOCALAPPDATA%\Minicor\DealerDesk\inbox\<Windows session ID>`.
 The sender must validate that PID is alive in its session before atomically publishing `<attempt UUID>.request.json` with `{ "attemptId": "<UUID>", "token": "<bearer token>", "action": "dealerdesk.critical-error", "pid": <process ID> }`.
 DealerDesk claims each file by renaming it to `.claimed`, checks its own PID and action, and validates the active attempt through `GET /api/injected-actions/attempts/:id` on the configured origin.
-Redirects are rejected.
+Redirects are rejected, and HTTP origins must be loopback addresses.
 The response must contain `active: true` and `deadlineAt` as epoch milliseconds.
 Network validation runs outside Tk; the UI thread checks the deadline again immediately before creating the dialog.
 The sender independently verifies the visible dialog titled `DealerDesk 98 - Critical Application Error` for that PID.
@@ -82,6 +82,6 @@ There is no receipt or automatic retry after an unknown outcome.
 
 Startup deletes abandoned request and claim files before advertising readiness.
 Shutdown removes readiness only if it still belongs to the current process.
-A crash can leave readiness behind; the next startup checks the owner and replaces stale readiness.
+A crash can leave readiness behind; the next startup replaces stale readiness under the session mutex.
 Requests from earlier processes cannot execute in future runs.
 The test environment must protect the configured origin and local session files from untrusted writers.

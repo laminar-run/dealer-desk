@@ -22,27 +22,6 @@ def session_id(pid):
     return value.value
 
 
-def live_owner(pid):
-    if type(pid) is not int or pid <= 0:
-        return False
-    try:
-        if session_id(pid) != session_id(os.getpid()):
-            return False
-    except OSError:
-        return False
-    ctypes.windll.kernel32.OpenProcess.restype = ctypes.c_void_p
-    ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    ctypes.windll.kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    try:
-        code = ctypes.c_ulong()
-        return bool(ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
-    finally:
-        ctypes.windll.kernel32.CloseHandle(handle)
-
-
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -127,6 +106,9 @@ class Receiver:
                 ready.unlink()
         except (OSError, ValueError):
             pass
+        finally:
+            if hasattr(self, "mutex"):
+                self.mutex.Close()
 
 
 def start_test_inbox(root):
@@ -136,6 +118,8 @@ def start_test_inbox(root):
     parsed = urlsplit(origin)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise ValueError("Middleware URL must be a trusted origin")
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError("HTTP middleware origin must be loopback")
     import win32event
     import win32api
     mutex = win32event.CreateMutex(None, False, "Local\\MinicorDealerDeskTestInbox")
@@ -145,13 +129,6 @@ def start_test_inbox(root):
     directory = Path(os.environ["LOCALAPPDATA"]) / "Minicor" / "DealerDesk" / "inbox" / str(session_id(os.getpid()))
     directory.mkdir(parents=True, exist_ok=True)
     ready = directory / "ready.json"
-    if ready.exists():
-        try:
-            owner = json.loads(ready.read_text())["pid"]
-        except (ValueError, KeyError):
-            owner = None
-        if owner is not None and live_owner(owner):
-            raise RuntimeError("Another DealerDesk test inbox is active")
     for pattern in ("*.request.json", "*.claimed"):
         for path in directory.glob(pattern):
             path.unlink(missing_ok=True)
