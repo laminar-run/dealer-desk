@@ -63,8 +63,8 @@ def main():
             pass
 
     try:
-        from action_control.receiver import start_installed
-        start_installed(root)
+        from action_control.receiver import start_test_inbox
+        start_test_inbox(root)
     except Exception:
         logging.exception("Cannot start optional action tools")
     _launch_login(root)

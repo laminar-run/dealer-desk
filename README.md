@@ -64,29 +64,24 @@ See `config.json -> use_cases` for full step-by-step flows. Highlights:
 - Appointment form: `btn_new_appt`, `btn_appt_lookup_customer`, `appt_datetime`, `appt_dept`, `appt_advisor`, `appt_reason`, `appt_status`, `btn_save_appt`
 - Inventory: `inventory_search`, `inventory_status_filter`, `btn_search_inventory`, `inventory_tree`
 
-## Workflow action installation
+## Test inbox
 
-Install MDS with its injected actions SDK before starting DealerDesk.
-The MDS installer places the Python client at `%ProgramW6432%\MinicorDesktopService\sdk\injected_actions.py` (the 64-bit Program Files directory).
-Install the action for each Windows user that runs DealerDesk.
-Run these commands from the DealerDesk directory in that user's session.
+Set `INJECTED_ACTION_MIDDLEWARE_ORIGIN` to the trusted middleware origin before launching DealerDesk in a Windows test session.
+Without this variable DealerDesk starts no inbox integration.
+No installed SDK, action manifest, registration, receipt store, or retry is required.
+Only one test inbox owner may run in a Windows session.
 
-```powershell
-pip install -r requirements.txt
-python -m action_control.install --instance installation-a --version (git rev-parse HEAD)
-python main.py
-```
+DealerDesk publishes `ready.json` containing `{ "pid": <process ID> }` under `%LOCALAPPDATA%\Minicor\DealerDesk\inbox\<Windows session ID>`.
+The sender must validate that PID is alive in its session before atomically publishing `<attempt UUID>.request.json` with `{ "attemptId": "<UUID>", "token": "<bearer token>", "action": "dealerdesk.critical-error", "pid": <process ID> }`.
+DealerDesk claims each file by renaming it to `.claimed`, checks its own PID and action, and validates the active attempt through `GET /api/injected-actions/attempts/:id` on the configured origin.
+Redirects are rejected.
+The response must contain `active: true` and `deadlineAt` as epoch milliseconds.
+Network validation runs outside Tk; the UI thread checks the deadline again immediately before creating the dialog.
+The sender independently verifies the visible dialog titled `DealerDesk 98 - Critical Application Error` for that PID.
+There is no receipt or automatic retry after an unknown outcome.
 
-The installer atomically writes `%ProgramData%\Minicor\actions\registrations\<user>\dealerdesk.json`.
-The user needs write access to that directory and MDS needs read access.
-Remove the registration file to uninstall the action, then restart DealerDesk.
-MDS advertises installed definitions on its next heartbeat, whether or not DealerDesk is running.
-DealerDesk claims requests from the local `MinicorInjectedActions-<Windows session ID>` named pipe and reports each outcome to the same server.
-The client checks that the pipe server runs as the same Windows user in the same session.
-Pipe calls run outside the Tk thread; the MDS SDK sets the three-second exchange timeout for claims and reports.
-DealerDesk creates the dialog on the Tk thread.
-MDS checks the deadline before handing out a claim and accepts reports only before that deadline.
-Once a request is claimed, its deadline cannot interrupt Tk: a dialog can still appear after its caller times out.
-The action ID is `dealerdesk.critical-error`, version 1, with empty `{}` parameters.
-It reports completion after the critical error dialog has been created.
-A timeout or interrupted report can leave the outcome unknown.
+Startup deletes abandoned request and claim files before advertising readiness.
+Shutdown removes readiness only if it still belongs to the current process.
+A crash can leave readiness behind; the next startup checks the owner and replaces stale readiness.
+Requests from earlier processes cannot execute in future runs.
+The test environment must protect the configured origin and local session files from untrusted writers.
