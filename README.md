@@ -63,3 +63,27 @@ See `config.json -> use_cases` for full step-by-step flows. Highlights:
 - Deal form: `btn_new_deal`, `btn_deal_lookup_customer`, `btn_deal_lookup_vehicle`, `deal_date`, `deal_salesperson`, `deal_type`, `deal_sale_price`, `deal_status`, `btn_save_deal`
 - Appointment form: `btn_new_appt`, `btn_appt_lookup_customer`, `appt_datetime`, `appt_dept`, `appt_advisor`, `appt_reason`, `appt_status`, `btn_save_appt`
 - Inventory: `inventory_search`, `inventory_status_filter`, `btn_search_inventory`, `inventory_tree`
+
+## Test inbox
+
+Set `INJECTED_ACTION_MIDDLEWARE_ORIGIN` to the trusted middleware origin before launching DealerDesk in a Windows test session.
+Without this variable DealerDesk starts no inbox integration.
+No installed SDK, action manifest, registration, receipt store, or retry is required.
+Only one test inbox owner may run in a Windows session.
+
+DealerDesk publishes `ready.json` containing `{ "pid": <process ID> }` under `%LOCALAPPDATA%\Minicor\DealerDesk\inbox\<Windows session ID>`.
+The sender must validate that PID is alive in its session before atomically publishing `<attempt UUID>.request.json` with `{ "attemptId": "<UUID>", "token": "<bearer token>", "action": "dealerdesk.critical-error", "pid": <process ID> }`.
+DealerDesk claims each file by renaming it to `.claimed`, checks its own PID and action, and validates the active attempt through `GET /api/injected-actions/attempts/:id` on the configured origin.
+Redirects are rejected, and HTTP origins must be loopback addresses.
+The response must contain `active: true` and `deadlineAt` as epoch milliseconds.
+Network validation runs outside Tk; the UI thread checks the deadline again immediately before creating the dialog.
+The sender independently verifies the visible dialog titled `DealerDesk 98 - Critical Application Error` for that PID.
+There is no receipt or automatic retry after an unknown outcome.
+An in-memory map prevents dispatching the same attempt again until its deadline.
+A cancellation after final validation can race with an already accepted UI effect; accepted work may finish.
+
+Startup deletes abandoned request and claim files before advertising readiness.
+Shutdown removes readiness only if it still belongs to the current process.
+A crash can leave readiness behind; the next startup replaces stale readiness under the session mutex.
+Startup removes files left by earlier runs; PID-only targeting cannot distinguish a delayed new publication if Windows reuses that PID while its attempt token is still active.
+The test environment must protect the configured origin and local session files from untrusted writers.

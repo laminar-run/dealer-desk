@@ -257,7 +257,7 @@ def scenario_slow_progress(root=None):
     r.after(0, _show)
 
 
-def scenario_critical_error(root=None):
+def scenario_critical_error(root=None, immediate=False):
     """Massive red CRITICAL ERROR modal with fake stack trace and useless buttons."""
     r = root or _root()
     if not r:
@@ -405,7 +405,10 @@ def scenario_critical_error(root=None):
                 width=w_val,
             ).pack(side=tk.LEFT, padx=8)
 
-    r.after(0, _show)
+    if immediate:
+        _show()
+    else:
+        r.after(0, _show)
 
 
 def scenario_field_corruption(root=None):

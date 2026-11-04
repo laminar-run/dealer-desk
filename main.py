@@ -1,4 +1,5 @@
 """DealerDesk 98 - Entry Point."""
+import logging
 import os
 import sys
 
@@ -61,6 +62,11 @@ def main():
         except Exception:
             pass
 
+    try:
+        from action_control.receiver import start_test_inbox
+        start_test_inbox(root)
+    except Exception:
+        logging.exception("Cannot start optional action tools")
     _launch_login(root)
     root.mainloop()
 
