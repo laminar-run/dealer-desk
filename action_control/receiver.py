@@ -57,14 +57,14 @@ class Receiver:
         if self.closed:
             return
         try:
+            now = time.time() * 1000
+            self.dispatched = {attempt: expiry for attempt, expiry in self.dispatched.items() if now < expiry}
             try:
                 path, deadline = self.results.get_nowait()
             except queue.Empty:
                 pass
             else:
                 self.busy = False
-                now = time.time() * 1000
-                self.dispatched = {attempt: expiry for attempt, expiry in self.dispatched.items() if now < expiry}
                 attempt = path.name.removesuffix(".request.claimed")
                 try:
                     if deadline is not None and time.time() * 1000 < deadline and attempt not in self.dispatched:
