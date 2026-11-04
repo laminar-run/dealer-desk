@@ -66,6 +66,8 @@ See `config.json -> use_cases` for full step-by-step flows. Highlights:
 
 ## Workflow action installation
 
+Install MDS with its injected actions SDK before starting DealerDesk.
+The MDS installer places the Python client at `%ProgramW6432%\MinicorDesktopService\sdk\injected_actions.py` (the 64-bit Program Files directory).
 Install the action for each Windows user that runs DealerDesk.
 Run these commands from the DealerDesk directory in that user's session.
 
@@ -79,33 +81,9 @@ The installer atomically writes `%ProgramData%\Minicor\actions\registrations\<us
 The user needs write access to that directory and MDS needs read access.
 Remove the registration file to uninstall the action, then restart DealerDesk.
 MDS advertises installed definitions on its next heartbeat, whether or not DealerDesk is running.
-DealerDesk polls its registered file inbox on the Tk thread every 100 ms; no server is started.
-A stopped app does not consume requests, and expired requests are discarded on restart.
-The inbox is `%ProgramData%\Minicor\actions\inboxes\<user>\<identity>`, where identity is the SHA-256 hex digest of UTF-8 `appId + NUL + instanceId`.
-The installer creates it and records its absolute path as `inbox`; both MDS and DealerDesk need read/write access.
-Local processes with that filesystem access can submit requests.
+DealerDesk claims requests from the local `MinicorInjectedActions-<Windows session ID>` named pipe and reports each outcome to the same server.
+The client checks that the pipe server runs as the same Windows user in the same session.
+Pipe calls run outside the Tk thread with a three-second timeout, while the dialog itself is created on the Tk thread.
 The action ID is `dealerdesk.critical-error`, version 1, with empty `{}` parameters.
-It acknowledges completion after the critical error dialog has been created on the Tk thread.
-A reused request ID returns the saved outcome or `unknown` after interruption.
-Receipts are appended to `%LOCALAPPDATA%\DealerDesk\actions\<instance>.executed-actions.jsonl` as plain-text JSON lines.
-The app flushes a `started` entry before executing and an `outcome` entry afterward, under an exclusive file lock.
-After a restart, a request with only `started` returns `unknown`; completed requests return their saved outcome.
-A malformed or incomplete log prevents further effects and returns `unknown` until the log is repaired.
-The log is retained without automatic rotation; deleting it removes the app's duplicate protection.
-
-### File protocol
-
-A sender atomically renames `<sha256(requestId)>.request.tmp` to `<sha256(requestId)>.request.json`.
-Its UTF-8 JSON body is `{"request": <action request>, "createdAt": <Unix seconds>, "expiresAt": <Unix seconds>}`.
-The request and result interfaces are unchanged; timestamps belong to the transport envelope.
-The app orders each pending snapshot by `createdAt`, then by request ID for equal timestamps.
-This orders requests already present, not requests that arrive after a snapshot.
-MDS sets a 15-second deadline and removes stale results before publishing.
-The receiver claims a request by creating a hard link named `<hash>.processing.json` without replacing an existing claim, then removes the request name.
-Both files are on the same local NTFS volume.
-After creating the effect, it atomically publishes `<hash>.result.json` containing the action result.
-Requests larger than 64 KiB, malformed requests, and requests past their deadline are discarded.
-MDS waits up to 15 seconds, validates the matching request ID, and removes its request and result files.
-A timeout returns `unknown`; a claimed action may already have happened.
-The receiver removes its processing file after handling and stale files after 60 seconds.
-An interrupted processing file is never replayed; the text log prevents repeating acknowledged effects while retained.
+It reports completion after the critical error dialog has been created.
+A timeout or interrupted report can leave the outcome unknown.

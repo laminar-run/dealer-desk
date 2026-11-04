@@ -1,15 +1,13 @@
-from bisect import insort
-import hashlib
 import json
 import logging
 import os
 from pathlib import Path
-import math
-import time
+import importlib.util
+import threading
+import queue
 
 from jsonschema import Draft202012Validator
 
-from action_control import receipts
 
 REQUEST_SCHEMA = {
     "type": "object",
@@ -47,11 +45,8 @@ def install(user, instance, version):
     directory = registration_dir(user)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "dealerdesk.json"
-    identity = hashlib.sha256(("dealerdesk\0" + instance).encode()).hexdigest()
-    inbox = directory.parent.parent / "inboxes" / directory.name / identity
-    inbox.mkdir(parents=True, exist_ok=True)
     entry = {"targetUser": user, "target": {"kind": "app", "appId": "dealerdesk", "instanceId": instance},
-             "installedVersion": version, "actions": [ACTION], "inbox": str(inbox)}
+             "installedVersion": version, "actions": [ACTION]}
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(entry), encoding="utf-8")
     os.replace(temp, path)
@@ -69,12 +64,26 @@ class Receiver:
     def __init__(self, root, registration):
         self.root = root
         self.registration = registration
-        self.inbox = Path(registration["inbox"])
-        directory = Path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))) / "DealerDesk" / "actions"
-        directory.mkdir(parents=True, exist_ok=True)
-        self.log_path = directory / (registration["target"]["instanceId"] + ".executed-actions.jsonl")
+        self.results = queue.Queue()
+        self.busy = False
+        path = Path(os.environ.get('ProgramW6432', os.environ.get('ProgramFiles', r'C:\Program Files'))) / 'MinicorDesktopService' / 'sdk' / 'injected_actions.py'
+        spec = importlib.util.spec_from_file_location('injected_actions', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.client = module
 
-    def execute(self, request, expires_at):
+    def call(self, message):
+        def worker():
+            try:
+                result = (self.client.claim_request(message['target']) if message['op'] == 'claim_request'
+                          else self.client.report(message['target'], message['requestId'], message['outcome']))
+                self.results.put((message, result, None))
+            except Exception as exc:
+                self.results.put((message, None, exc))
+        self.busy = True
+        threading.Thread(target=worker, daemon=True).start()
+
+    def execute(self, request):
         request_id = request.get("requestId") if isinstance(request, dict) else None
         try:
             Draft202012Validator(REQUEST_SCHEMA).validate(request)
@@ -83,100 +92,33 @@ class Receiver:
             Draft202012Validator(ACTION["inputSchema"]).validate(request["parameters"])
         except Exception as exc:
             return outcome(request_id, "rejected", str(exc))
-        fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         try:
-            with receipts.locked_log(self.log_path) as stream:
-                previous = receipts.read_receipts(stream).get(request_id)
-                if previous:
-                    if previous["fingerprint"] != fingerprint:
-                        return outcome(request_id, "rejected", "requestId was already used for a different request")
-                    return previous.get("result", outcome(request_id, "unknown", "Previous attempt was interrupted"))
-                receipts.append(stream, request_id, fingerprint, "started")
-                if time.time() >= expires_at:
-                    response = outcome(request_id, "rejected", "Request expired before execution")
-                else:
-                    from chaos.scenarios import scenario_critical_error
-                    try:
-                        scenario_critical_error(self.root, immediate=True)
-                        response = outcome(request_id, "completed")
-                    except Exception as exc:
-                        response = outcome(request_id, "failed", str(exc) or type(exc).__name__)
-                receipts.append(stream, request_id, fingerprint, "outcome", response)
-                return response
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            return outcome(request_id, "unknown", f"Cannot safely use action log: {exc}")
-
-    def pending_requests(self):
-        pending = []
-        for path in self.inbox.glob("*.request.json"):
-            try:
-                with path.open("rb") as stream:
-                    body = stream.read(65537)
-                if len(body) > 65536:
-                    raise ValueError("Request exceeds size limit")
-                envelope = json.loads(body)
-                created = envelope["createdAt"]
-                expires = envelope["expiresAt"]
-                request_id = envelope["request"]["requestId"]
-                if not isinstance(request_id, str) or any(type(t) not in (int, float) or not math.isfinite(t) for t in (created, expires)):
-                    raise ValueError("Invalid request ID or timestamp")
-                if not 0 < created <= expires or not 0 < expires - time.time() <= 30:
-                    raise ValueError("Invalid or expired request timestamp")
-                if path.name != hashlib.sha256(request_id.encode()).hexdigest() + ".request.json":
-                    raise ValueError("Request filename does not match its ID")
-                insort(pending, (created, request_id, path, body))
-                if len(pending) > 10:
-                    pending.pop()
-            except FileNotFoundError:
-                continue
-            except OSError:
-                logging.exception("Cannot read action request %s", path)
-                continue
-            except (ValueError, KeyError, TypeError, OverflowError):
-                logging.exception("Discarding invalid action request %s", path)
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    logging.exception("Cannot discard action request %s", path)
-        return pending
+            from chaos.scenarios import scenario_critical_error
+            scenario_critical_error(self.root, immediate=True)
+            return outcome(request_id, "completed")
+        except Exception as exc:
+            return outcome(request_id, "failed", str(exc) or type(exc).__name__)
 
     def poll(self):
         try:
-            for _, _, pending, expected_body in self.pending_requests():
-                processing = pending.with_name(pending.name.replace(".request.json", ".processing.json"))
-                result = pending.with_name(pending.name.replace(".request.json", ".result.json"))
-                temporary = result.with_suffix(".tmp")
-                claimed = False
-                try:
-                    os.link(pending, processing)
-                    claimed = True
-                    pending.unlink()
-                    with processing.open("rb") as stream:
-                        body = stream.read(65537)
-                    if body != expected_body:
-                        raise ValueError("Request changed after ordering")
-                    envelope = json.loads(body)
-                    request = envelope["request"]
-                    expires_at = envelope["expiresAt"]
-                    response = self.execute(request, expires_at)
-                    temporary.write_text(json.dumps(response), encoding="utf-8")
-                    os.replace(temporary, result)
-                except (FileNotFoundError, FileExistsError):
-                    pass
-                except (OSError, ValueError, KeyError, TypeError):
-                    logging.exception("Cannot process action request %s", pending)
-                finally:
-                    if claimed:
-                        processing.unlink(missing_ok=True)
-                        temporary.unlink(missing_ok=True)
-            for path in self.inbox.iterdir():
-                try:
-                    if path.suffix in (".json", ".tmp") and time.time() - path.stat().st_mtime > 60:
-                        path.unlink(missing_ok=True)
-                except FileNotFoundError:
-                    continue
-        except OSError:
-            logging.exception("Cannot poll action inbox %s", self.inbox)
+            try:
+                message, response, error = self.results.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                self.busy = False
+                if error:
+                    logging.warning("Injected action pipe unavailable: %s", error)
+                elif message['op'] == 'claim_request':
+                    request = response.get('request')
+                    if request is not None:
+                        result = self.execute(request)
+                        self.call({'op': 'report', 'target': self.registration['target'],
+                                   'requestId': result['requestId'], 'outcome': result['outcome']})
+                elif response.get('ok') is not True:
+                    logging.warning("Injected action report was not accepted")
+            if not self.busy:
+                self.call({'op': 'claim_request', 'target': self.registration['target']})
         finally:
             self.root.after(100, self.poll)
 
