@@ -5,6 +5,7 @@ from pathlib import Path
 
 class Publication:
     def __init__(self):
+        import ntsecuritycon
         import win32api
         import win32con
         import win32event
@@ -49,7 +50,7 @@ class Publication:
                 acl.AddAccessAllowedAceEx(
                     win32security.ACL_REVISION,
                     inheritance,
-                    win32con.FILE_ALL_ACCESS,
+                    ntsecuritycon.FILE_ALL_ACCESS,
                     sid,
                 )
             win32security.SetNamedSecurityInfo(
