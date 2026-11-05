@@ -1,6 +1,7 @@
 import hmac
 import json
 import queue
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -76,6 +77,20 @@ class Receiver:
             def setup(self):
                 super().setup()
                 self.connection.settimeout(2)
+                self.read_deadline = time.monotonic() + 2
+                self.read_timer = threading.Timer(2, self.expire_read)
+                self.read_timer.start()
+
+            def expire_read(self):
+                try:
+                    self.connection.shutdown(socket.SHUT_RD)
+                except OSError:
+                    pass
+
+            def finish(self):
+                self.read_timer.cancel()
+                self.read_timer.join()
+                super().finish()
 
             def log_message(self, *args):
                 pass
@@ -147,6 +162,10 @@ class Receiver:
             ):
                 raise ValueError
         except (ValueError, UnicodeError, RecursionError):
+            return 400, "rejected", "invalid_request"
+        request.read_timer.cancel()
+        request.read_timer.join()
+        if time.monotonic() >= request.read_deadline:
             return 400, "rejected", "invalid_request"
         with self.admission:
             if self.closed:

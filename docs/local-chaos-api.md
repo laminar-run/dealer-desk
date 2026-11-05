@@ -43,11 +43,15 @@ This affects primary Tk client controls only, excluding titlebars, native dialog
 Responses contain `status` and an optional `code`.
 HTTP 200 has `status: completed`.
 Rejections use 400 `invalid_request`, 401 `unauthorized`, 404 `unknown_route`, 409 `no_eligible_window` or `already_armed`, 413 `body_too_large`, or 503 `busy` or `shutting_down`.
+Unsupported HTTP methods return 501 `invalid_request`.
+Malformed HTTP requests can use other parser rejection codes.
 Pending expiry returns 504 with `status: rejected` and `code: expired`; it cannot execute later.
 A started effect unconfirmed at its deadline returns 504 with `status: unknown` and `code: action_running`.
 Other execution failures return 500 with `status: unknown` and `code: action_failed` or `effect_unconfirmed`.
 
 `timeoutMs` begins after complete request admission and validation and uses a monotonic clock.
+Headers and body must arrive within two seconds of connection handling.
+This separate admission limit does not shorten accepted work's `timeoutMs`.
 The HTTP worker is serial; unread socket backlog is outside this duration.
 Use a socket timeout of `timeoutMs / 1000 + 3` seconds within a longer ordinary RPA step timeout.
 A transport timeout has unknown outcome and does not cancel a request accepted later.

@@ -1,5 +1,6 @@
 import http.client
 import json
+import socket
 import sys
 import threading
 import time
@@ -31,7 +32,7 @@ class ReceiverTests(unittest.TestCase):
 
     def request(self, body, key="test-key", route="/window/minimize"):
         connection = http.client.HTTPConnection(
-            "127.0.0.1", self.server.http.server_port, timeout=2
+            "127.0.0.1", self.server.http.server_port, timeout=3
         )
         try:
             connection.request(
@@ -118,6 +119,40 @@ class ReceiverTests(unittest.TestCase):
             time.sleep(0.001)
         self.assertFalse(work.start())
         self.assertEqual(work.wait(), (504, "rejected", "expired"))
+
+    def test_trickled_headers_and_body_release_the_serial_worker(self):
+        for initial in (
+            b"POST /window/minimize HTTP/1.0\r\nX-Trickle: ",
+            (
+                b"POST /window/minimize HTTP/1.0\r\nAuthorization: Bearer test-key\r\n"
+                b"Content-Type: application/json\r\nContent-Length: 2048\r\n\r\n{"
+            ),
+        ):
+            with self.subTest(initial=initial):
+                responses = []
+                with socket.create_connection(self.server.http.server_address) as slow:
+                    slow.sendall(initial)
+                    caller = threading.Thread(
+                        target=lambda responses=responses: responses.append(
+                            self.request({"timeoutMs": 5})
+                        )
+                    )
+                    caller.start()
+                    deadline = time.monotonic() + 2.2
+                    while time.monotonic() < deadline:
+                        try:
+                            slow.sendall(b" ")
+                        except OSError:
+                            break
+                        time.sleep(0.05)
+                    caller.join(0.3)
+                    completed = responses[:]
+                caller.join(1)
+                self.assertEqual(
+                    completed, [(504, {"status": "rejected", "code": "expired"})]
+                )
+                self.server._drain()
+                self.assertEqual(self.effects, [])
 
 
 @unittest.skipUnless(sys.platform == "win32", "Requires Windows Tk mouse bindings")
