@@ -8,8 +8,8 @@ class Publication:
         import win32api
         import win32con
         import win32event
-        import win32process
         import win32security
+        import win32ts
 
         self.mutex = win32event.CreateMutex(
             None, False, r"Local\Minicor.DealerDesk.Chaos"
@@ -21,7 +21,7 @@ class Publication:
             )
         self.path = None
         try:
-            session = win32process.ProcessIdToSessionId(os.getpid())
+            session = win32ts.ProcessIdToSessionId(os.getpid())
             directory = (
                 Path(os.environ["LOCALAPPDATA"])
                 / "Minicor/DealerDesk/chaos"
