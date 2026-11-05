@@ -63,3 +63,6 @@ See `config.json -> use_cases` for full step-by-step flows. Highlights:
 - Deal form: `btn_new_deal`, `btn_deal_lookup_customer`, `btn_deal_lookup_vehicle`, `deal_date`, `deal_salesperson`, `deal_type`, `deal_sale_price`, `deal_status`, `btn_save_deal`
 - Appointment form: `btn_new_appt`, `btn_appt_lookup_customer`, `appt_datetime`, `appt_dept`, `appt_advisor`, `appt_reason`, `appt_status`, `btn_save_appt`
 - Inventory: `inventory_search`, `inventory_status_filter`, `btn_search_inventory`, `inventory_tree`
+
+The Windows desktop also starts a session-local chaos API for ordinary RPA job scripts.
+See [the local API contract](docs/local-chaos-api.md) for discovery, actions, security, and timeout limits.

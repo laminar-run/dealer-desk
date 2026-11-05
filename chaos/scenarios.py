@@ -257,7 +257,7 @@ def scenario_slow_progress(root=None):
     r.after(0, _show)
 
 
-def scenario_critical_error(root=None):
+def show_critical_error(root=None):
     """Massive red CRITICAL ERROR modal with fake stack trace and useless buttons."""
     r = root or _root()
     if not r:
@@ -306,106 +306,118 @@ def scenario_critical_error(root=None):
         f"or call technical support at 1-800-555-0199 (hold time ~45 min)."
     )
 
-    def _show():
-        win = tk.Toplevel(r)
-        win.title("DealerDesk 98 - Critical Application Error")
-        win.configure(bg="#C0C0C0")
-        win.resizable(False, False)
-        win.attributes("-topmost", True)
-        win.grab_set()
+    win = tk.Toplevel(r)
+    win.title("DealerDesk 98 - Critical Application Error")
+    win.configure(bg="#C0C0C0")
+    win.resizable(False, False)
+    win.attributes("-topmost", True)
+    win.grab_set()
 
-        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        w, h = 580, 460
-        win.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+    sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+    w, h = 580, 460
+    win.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
 
-        title_f = tk.Frame(win, bg="#8B0000", pady=6)
-        title_f.pack(fill=tk.X)
-        tk.Label(title_f, text="X  CRITICAL APPLICATION ERROR",
-                 font=("MS Sans Serif", 11, "bold"),
-                 bg="#8B0000", fg="#FFFFFF", padx=10).pack(side=tk.LEFT)
+    title_f = tk.Frame(win, bg="#8B0000", pady=6)
+    title_f.pack(fill=tk.X)
+    tk.Label(title_f, text="X  CRITICAL APPLICATION ERROR",
+             font=("MS Sans Serif", 11, "bold"),
+             bg="#8B0000", fg="#FFFFFF", padx=10).pack(side=tk.LEFT)
 
-        top_row = tk.Frame(win, bg="#C0C0C0", pady=6)
-        top_row.pack(fill=tk.X, padx=10)
-        tk.Label(top_row, text="ERROR", font=("MS Sans Serif", 28, "bold"),
-                 bg="#8B0000", fg="#FFFFFF", padx=12, pady=4,
-                 relief="raised", bd=3).pack(side=tk.LEFT)
-        tk.Label(top_row, text=f"  {code}",
-                 font=("Courier New", 8, "bold"),
-                 bg="#C0C0C0", fg="#8B0000",
-                 wraplength=420, justify="left").pack(side=tk.LEFT, padx=10)
+    top_row = tk.Frame(win, bg="#C0C0C0", pady=6)
+    top_row.pack(fill=tk.X, padx=10)
+    tk.Label(top_row, text="ERROR", font=("MS Sans Serif", 28, "bold"),
+             bg="#8B0000", fg="#FFFFFF", padx=12, pady=4,
+             relief="raised", bd=3).pack(side=tk.LEFT)
+    tk.Label(top_row, text=f"  {code}",
+             font=("Courier New", 8, "bold"),
+             bg="#C0C0C0", fg="#8B0000",
+             wraplength=420, justify="left").pack(side=tk.LEFT, padx=10)
 
-        tk.Frame(win, bg="#808080", height=2).pack(fill=tk.X, padx=6, pady=2)
+    tk.Frame(win, bg="#808080", height=2).pack(fill=tk.X, padx=6, pady=2)
 
-        txt_frame = tk.Frame(win, bg="#C0C0C0")
-        txt_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
-        txt = tk.Text(txt_frame, font=("Courier New", 8), bg="#000000", fg="#FF4444",
-                      relief="sunken", bd=2, wrap="word", height=14)
-        vsb = tk.Scrollbar(txt_frame, command=txt.yview, bg="#C0C0C0")
-        txt.configure(yscrollcommand=vsb.set)
-        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        txt.insert("1.0", error_text)
+    txt_frame = tk.Frame(win, bg="#C0C0C0")
+    txt_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+    txt = tk.Text(txt_frame, font=("Courier New", 8), bg="#000000", fg="#FF4444",
+                  relief="sunken", bd=2, wrap="word", height=14)
+    vsb = tk.Scrollbar(txt_frame, command=txt.yview, bg="#C0C0C0")
+    txt.configure(yscrollcommand=vsb.set)
+    txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    txt.insert("1.0", error_text)
+    txt.configure(state="disabled")
+
+    tk.Frame(win, bg="#808080", height=2).pack(fill=tk.X, padx=6, pady=2)
+
+    btn_row = tk.Frame(win, bg="#C0C0C0", pady=8)
+    btn_row.pack(fill=tk.X)
+
+    def _ignore():
+        from tkinter import messagebox as mb
+        mb.askyesno(
+            "Ignore Error?",
+            "WARNING: Ignoring this error may result in data corruption,\n"
+            "loss of customer records, or system instability.\n\n"
+            "Are you absolutely sure you want to ignore this error?",
+            parent=win,
+        )
+
+    def _retry():
+        for btn in btn_row.winfo_children():
+            try:
+                btn.configure(state="disabled")
+            except Exception:
+                pass
+        win.title("DealerDesk 98 - Retrying...")
+        win.after(500, lambda: win.title("DealerDesk 98 - Critical Application Error"))
+        win.after(600, lambda: [btn.configure(state="normal")
+                                 for btn in btn_row.winfo_children()
+                                 if isinstance(btn, tk.Button)])
+        txt.configure(state="normal")
+        txt.delete("1.0", "end")
+        txt.insert("1.0", "Retrying operation...\n\n" + error_text)
         txt.configure(state="disabled")
 
-        tk.Frame(win, bg="#808080", height=2).pack(fill=tk.X, padx=6, pady=2)
+    def _report():
+        from tkinter import messagebox as mb
+        mb.showinfo(
+            "Report Error",
+            "Sending error report to: helpdesk@dealerdesk.local\n\n"
+            "Please do not turn off your computer.\n"
+            "This may take several minutes.\n\n"
+            "[Report sent successfully]\n"
+            "Ticket ID: INC-" + str(random.randint(100000, 999999)) +
+            "\nExpected response time: 3-5 business days.",
+            parent=win,
+        )
+        win.destroy()
 
-        btn_row = tk.Frame(win, bg="#C0C0C0", pady=8)
-        btn_row.pack(fill=tk.X)
+    for text, cmd, w_val in [
+        ("Ignore", _ignore, 10),
+        ("Retry", _retry, 10),
+        ("Report to IT", _report, 13),
+        ("OK", win.destroy, 10),
+    ]:
+        tk.Button(
+            btn_row, text=text, command=cmd,
+            font=("MS Sans Serif", 8),
+            bg="#C0C0C0", relief="raised", bd=2,
+            width=w_val,
+        ).pack(side=tk.LEFT, padx=8)
+    return win
 
-        def _ignore():
-            from tkinter import messagebox as mb
-            mb.askyesno(
-                "Ignore Error?",
-                "WARNING: Ignoring this error may result in data corruption,\n"
-                "loss of customer records, or system instability.\n\n"
-                "Are you absolutely sure you want to ignore this error?",
-                parent=win,
-            )
 
-        def _retry():
-            for btn in btn_row.winfo_children():
-                try:
-                    btn.configure(state="disabled")
-                except Exception:
-                    pass
-            win.title("DealerDesk 98 - Retrying...")
-            win.after(500, lambda: win.title("DealerDesk 98 - Critical Application Error"))
-            win.after(600, lambda: [btn.configure(state="normal")
-                                     for btn in btn_row.winfo_children()
-                                     if isinstance(btn, tk.Button)])
-            txt.configure(state="normal")
-            txt.delete("1.0", "end")
-            txt.insert("1.0", "Retrying operation...\n\n" + error_text)
-            txt.configure(state="disabled")
+def scenario_critical_error(root=None):
+    r = root or _root()
+    if r:
+        r.after(0, lambda: show_critical_error(r))
 
-        def _report():
-            from tkinter import messagebox as mb
-            mb.showinfo(
-                "Report Error",
-                "Sending error report to: helpdesk@dealerdesk.local\n\n"
-                "Please do not turn off your computer.\n"
-                "This may take several minutes.\n\n"
-                "[Report sent successfully]\n"
-                "Ticket ID: INC-" + str(random.randint(100000, 999999)) +
-                "\nExpected response time: 3-5 business days.",
-                parent=win,
-            )
-            win.destroy()
 
-        for text, cmd, w_val in [
-            ("Ignore", _ignore, 10),
-            ("Retry", _retry, 10),
-            ("Report to IT", _report, 13),
-            ("OK", win.destroy, 10),
-        ]:
-            tk.Button(
-                btn_row, text=text, command=cmd,
-                font=("MS Sans Serif", 8),
-                bg="#C0C0C0", relief="raised", bd=2,
-                width=w_val,
-            ).pack(side=tk.LEFT, padx=8)
-
-    r.after(0, _show)
+def inject_critical_error(root):
+    win = show_critical_error(root)
+    win.update_idletasks()
+    if win.winfo_ismapped() and win.grab_current() == win:
+        return 200, "completed", None
+    return 500, "unknown", "effect_unconfirmed"
 
 
 def scenario_field_corruption(root=None):

@@ -1,0 +1,177 @@
+import http.client
+import json
+import threading
+import time
+import sys
+import unittest
+from types import SimpleNamespace
+
+from chaos.controls import Controls
+from chaos.receiver import Receiver, Work
+
+
+class ReceiverTests(unittest.TestCase):
+    def setUp(self):
+        self.root = SimpleNamespace(
+            after=lambda *args: "poll", after_cancel=lambda *args: None
+        )
+        self.effects = []
+        self.server = Receiver(
+            self.root,
+            "test-key",
+            {
+                "/window/minimize": lambda parameters: (
+                    self.effects.append(parameters) or (200, "completed", None)
+                )
+            },
+        )
+
+    def tearDown(self):
+        self.server.close()
+
+    def request(self, body, key="test-key", route="/window/minimize"):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.http.server_port, timeout=2
+        )
+        try:
+            connection.request(
+                "POST",
+                route,
+                body=json.dumps(body),
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
+    def test_auth_validation_and_expired_http_never_execute(self):
+        for body, key, route, code in [
+            ({"timeoutMs": 5}, "wrong", "/window/minimize", 401),
+            ({"timeoutMs": True}, "test-key", "/window/minimize", 400),
+            ({"timeoutMs": 30001}, "test-key", "/window/minimize", 400),
+            ({"timeoutMs": 1, "extra": 0}, "test-key", "/window/minimize", 400),
+            ({"timeoutMs": 5}, "test-key", "/WINDOW/minimize", 404),
+            ({"timeoutMs": 5, "x": 2**31, "y": 0}, "test-key", "/window/move", 400),
+        ]:
+            with self.subTest(body=body, key=key, route=route):
+                self.assertEqual(self.request(body, key, route)[0], code)
+                self.assertTrue(self.server.pending.empty())
+        self.assertEqual(
+            self.request({"timeoutMs": 5}),
+            (504, {"status": "rejected", "code": "expired"}),
+        )
+        self.server._drain()
+        self.assertEqual(self.effects, [])
+
+    def test_completed_http_waits_for_effect_and_started_timeout_is_unknown(self):
+        responses = []
+        caller = threading.Thread(
+            target=lambda: responses.append(self.request({"timeoutMs": 500}))
+        )
+        caller.start()
+        work = self.server.pending.get(timeout=1)
+        self.assertEqual(responses, [])
+        self.server.pending.put_nowait(work)
+        self.server._drain()
+        caller.join(1)
+        self.assertEqual(self.effects, [{"timeoutMs": 500}])
+        self.assertEqual(responses, [(200, {"status": "completed"})])
+        work = Work("/window/minimize", {"timeoutMs": 1})
+        self.assertTrue(work.start())
+        self.assertEqual(work.wait(), (504, "unknown", "action_running"))
+        self.assertFalse(work.start())
+        work.finish((200, "completed", None))
+        self.assertEqual(work.wait(), (504, "unknown", "action_running"))
+
+    def test_start_expiry_race_has_one_winner(self):
+        for _ in range(100):
+            work = Work("/window/minimize", {"timeoutMs": 1})
+            barrier = threading.Barrier(2)
+            started = []
+
+            def run():
+                barrier.wait()
+                if work.start():
+                    started.append(True)
+                    work.finish((200, "completed", None))
+
+            worker = threading.Thread(target=run)
+            worker.start()
+            barrier.wait()
+            result = work.wait()
+            worker.join()
+            if result[1] == "rejected":
+                self.assertFalse(started)
+                self.assertEqual(result[2], "expired")
+            else:
+                self.assertTrue(started)
+                self.assertIn(result[1], ("completed", "unknown"))
+        work = Work("/window/minimize", {"timeoutMs": 1})
+        time.sleep(0.003)
+        self.assertFalse(work.start())
+        self.assertEqual(work.wait(), (504, "rejected", "expired"))
+
+
+@unittest.skipUnless(sys.platform == "win32", "Requires Windows Tk mouse bindings")
+class ClickTests(unittest.TestCase):
+    def setUp(self):
+        import tkinter as tk
+
+        self.tk = tk
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        self.root.withdraw()
+        self.window = tk.Toplevel(self.root)
+        self.controls = Controls(self.root)
+        self.controls.set_primary(self.window)
+        self.window.grab_set()
+        self.calls = []
+        self.button = tk.Button(
+            self.window, text="Click", command=lambda: self.calls.append("command")
+        )
+        self.button.pack()
+        self.root.update()
+
+    def tearDown(self):
+        if hasattr(self, "root"):
+            self.root.destroy()
+
+    def click(self, button, release=True):
+        button.event_generate("<Enter>", x=2, y=2)
+        button.event_generate("<ButtonPress-1>", x=2, y=2)
+        if release:
+            button.event_generate("<ButtonRelease-1>", x=2, y=2)
+        self.root.update()
+
+    def test_widget_press_and_button_release_are_swallowed_once(self):
+        self.button.bind("<ButtonPress-1>", lambda event: self.calls.append("press"))
+        self.assertEqual(self.controls.ignore_next_click({})[0], 200)
+        self.assertEqual(self.controls.ignore_next_click({})[2], "already_armed")
+        self.click(self.button)
+        self.assertEqual(self.calls, [])
+        self.click(self.button)
+        self.assertEqual(self.calls, ["press", "command"])
+
+    def test_dynamic_widget_lost_release_and_other_modal(self):
+        self.controls.ignore_next_click({})
+        dynamic = self.tk.Button(
+            self.window, text="New", command=lambda: self.calls.append("dynamic")
+        )
+        dynamic.pack()
+        self.root.update()
+        self.click(dynamic, release=False)
+        self.assertEqual(self.calls, [])
+        self.click(dynamic)
+        self.assertEqual(self.calls, ["dynamic"])
+        modal = self.tk.Toplevel(self.root)
+        modal.grab_set()
+        self.assertEqual(self.controls.ignore_next_click({})[2], "no_eligible_window")
+        modal.destroy()
+        self.window.grab_set()
+        self.assertEqual(self.controls.ignore_next_click({})[0], 200)
