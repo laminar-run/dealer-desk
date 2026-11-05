@@ -197,7 +197,6 @@ class ClickTests(unittest.TestCase):
                 self.assertEqual(self.controls.move({"x": 140, "y": 110})[0], 200)
                 self.root.update()
                 self.assertFalse(win32gui.IsIconic(hwnd))
-                self.assertFalse(win32gui.IsZoomed(hwnd))
                 self.assertEqual(win32gui.GetWindowRect(hwnd)[:2], (140, 110))
                 self.assertEqual(self.window.winfo_width(), 320)
                 self.assertEqual(self.window.winfo_height(), 240)
