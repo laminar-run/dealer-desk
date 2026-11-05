@@ -1,5 +1,3 @@
-"""Authenticated loopback requests handed to the Tk thread."""
-
 import hmac
 import json
 import queue
@@ -57,7 +55,8 @@ class Work:
             if self.state == "pending":
                 self._finish((504, "rejected", "expired"))
             if self.result and (
-                self.result[1] == "rejected" or self.finished_at <= self.deadline
+                self.result[2] in ("expired", "shutting_down")
+                or self.finished_at <= self.deadline
             ):
                 return self.result
             return 504, "unknown", "action_running"

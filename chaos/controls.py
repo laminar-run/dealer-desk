@@ -1,6 +1,3 @@
-"""Shared primary-window actions and one Tk left-click suppression."""
-
-
 class Controls:
     def __init__(self, root):
         self.root = root

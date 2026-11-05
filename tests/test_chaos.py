@@ -1,8 +1,8 @@
 import http.client
 import json
+import sys
 import threading
 import time
-import sys
 import unittest
 from types import SimpleNamespace
 
@@ -80,12 +80,15 @@ class ReceiverTests(unittest.TestCase):
         caller.join(1)
         self.assertEqual(self.effects, [{"timeoutMs": 500}])
         self.assertEqual(responses, [(200, {"status": "completed"})])
-        work = Work("/window/minimize", {"timeoutMs": 1})
-        self.assertTrue(work.start())
-        self.assertEqual(work.wait(), (504, "unknown", "action_running"))
-        self.assertFalse(work.start())
-        work.finish((200, "completed", None))
-        self.assertEqual(work.wait(), (504, "unknown", "action_running"))
+        for result in ((200, "completed", None), (409, "rejected", "already_armed")):
+            work = Work("/window/minimize", {"timeoutMs": 50})
+            self.assertTrue(work.start())
+            self.assertEqual(work.wait(), (504, "unknown", "action_running"))
+            self.assertFalse(work.start())
+            while time.monotonic() <= work.deadline:
+                time.sleep(0.001)
+            work.finish(result)
+            self.assertEqual(work.wait(), (504, "unknown", "action_running"))
 
     def test_start_expiry_race_has_one_winner(self):
         for _ in range(100):
@@ -93,7 +96,7 @@ class ReceiverTests(unittest.TestCase):
             barrier = threading.Barrier(2)
             started = []
 
-            def run():
+            def run(work=work, barrier=barrier, started=started):
                 barrier.wait()
                 if work.start():
                     started.append(True)
@@ -111,7 +114,8 @@ class ReceiverTests(unittest.TestCase):
                 self.assertTrue(started)
                 self.assertIn(result[1], ("completed", "unknown"))
         work = Work("/window/minimize", {"timeoutMs": 1})
-        time.sleep(0.003)
+        while time.monotonic() < work.deadline:
+            time.sleep(0.001)
         self.assertFalse(work.start())
         self.assertEqual(work.wait(), (504, "rejected", "expired"))
 

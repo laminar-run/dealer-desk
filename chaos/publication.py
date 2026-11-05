@@ -1,5 +1,3 @@
-"""Windows session discovery, protected before any key is written."""
-
 import json
 import os
 from pathlib import Path
