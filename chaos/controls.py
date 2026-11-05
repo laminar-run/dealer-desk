@@ -70,10 +70,10 @@ class Controls:
             return 409, "rejected", "no_eligible_window"
         hwnd = win32gui.GetAncestor(window.winfo_id(), win32con.GA_ROOT)
         if minimize:
-            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            window.iconify()
             confirmed = win32gui.IsIconic(hwnd)
         else:
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            window.state("normal")
             win32gui.SetWindowPos(
                 hwnd,
                 0,

@@ -32,6 +32,7 @@ Routes are exact and lowercase.
 | `/dms/critical-error` | None | Observe the existing critical-error dialog mapped with its modal grab. |
 
 Shared controls target the explicit current login, second-factor, or dashboard Toplevel.
+Window state changes use Tk's window manager so minimize and restore preserve its client geometry; native Win32 observations confirm the resulting state and outer position.
 The login's own grab is eligible; another modal prevents shared controls until dismissed.
 Click suppression runs before widget and class bindings, including dynamically mapped widgets.
 Completed means armed, not consumed.

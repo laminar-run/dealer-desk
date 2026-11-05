@@ -179,3 +179,25 @@ class ClickTests(unittest.TestCase):
         modal.destroy()
         self.window.grab_set()
         self.assertEqual(self.controls.ignore_next_click({})[0], 200)
+
+    def test_minimize_and_move_restore_preserve_client_size(self):
+        import win32con
+        import win32gui
+
+        self.window.geometry("320x240+100+100")
+        self.root.update()
+        hwnd = win32gui.GetAncestor(self.window.winfo_id(), win32con.GA_ROOT)
+        for state in ("normal", "zoomed"):
+            with self.subTest(state=state):
+                self.window.resizable(state == "zoomed", state == "zoomed")
+                self.window.state(state)
+                self.root.update()
+                self.assertEqual(self.controls.minimize({})[0], 200)
+                self.assertTrue(win32gui.IsIconic(hwnd))
+                self.assertEqual(self.controls.move({"x": 140, "y": 110})[0], 200)
+                self.root.update()
+                self.assertFalse(win32gui.IsIconic(hwnd))
+                self.assertFalse(win32gui.IsZoomed(hwnd))
+                self.assertEqual(win32gui.GetWindowRect(hwnd)[:2], (140, 110))
+                self.assertEqual(self.window.winfo_width(), 320)
+                self.assertEqual(self.window.winfo_height(), 240)
