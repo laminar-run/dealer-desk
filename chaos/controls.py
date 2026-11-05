@@ -73,6 +73,7 @@ class Controls:
             window.iconify()
             confirmed = win32gui.IsIconic(hwnd)
         else:
+            window.deiconify()
             window.state("normal")
             win32gui.SetWindowPos(
                 hwnd,
@@ -83,7 +84,8 @@ class Controls:
                 0,
                 win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE,
             )
-            confirmed = win32gui.GetWindowRect(hwnd)[:2] == (
+            normal = win32gui.GetWindowPlacement(hwnd)[1] == win32con.SW_SHOWNORMAL
+            confirmed = normal and win32gui.GetWindowRect(hwnd)[:2] == (
                 parameters["x"],
                 parameters["y"],
             )

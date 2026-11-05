@@ -186,12 +186,13 @@ class ClickTests(unittest.TestCase):
 
         self.window.geometry("320x240+100+100")
         self.root.update()
-        hwnd = win32gui.GetAncestor(self.window.winfo_id(), win32con.GA_ROOT)
         for state in ("normal", "zoomed"):
             with self.subTest(state=state):
                 self.window.resizable(state == "zoomed", state == "zoomed")
                 self.window.state(state)
                 self.root.update()
+                hwnd = win32gui.GetAncestor(self.window.winfo_id(), win32con.GA_ROOT)
+                self.assertEqual(self.window.state(), state)
                 self.assertEqual(self.controls.minimize({})[0], 200)
                 self.assertTrue(win32gui.IsIconic(hwnd))
                 self.assertEqual(self.controls.move({"x": 140, "y": 110})[0], 200)
