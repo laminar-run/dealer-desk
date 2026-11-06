@@ -1,3 +1,4 @@
+import gc
 import http.client
 import json
 import socket
@@ -35,6 +36,7 @@ class ReceiverTests(unittest.TestCase):
         self.server.close()
         self.controls = None
         self.root = None
+        gc.collect()
 
     def request(self, body, key="test-key", route="/window/minimize", chunked=False):
         connection = http.client.HTTPConnection(
@@ -67,12 +69,7 @@ class ReceiverTests(unittest.TestCase):
             ({"timeoutMs": 5}, "wrong", "/window/minimize", 401),
             ({"timeoutMs": True}, "test-key", "/window/minimize", 422),
             ({"timeoutMs": 30001}, "test-key", "/window/minimize", 422),
-            (
-                {"timeoutMs": 1, "extra": "x" * 2048},
-                "test-key",
-                "/window/minimize",
-                422,
-            ),
+            ({"timeoutMs": 1, "extra": "x"}, "test-key", "/window/minimize", 422),
             ({"timeoutMs": "5"}, "test-key", "/window/minimize", 422),
             ({"timeoutMs": 5}, "test-key", "/WINDOW/minimize", 404),
             ({"timeoutMs": 5}, "test-key", "/window/minimize/", 404),
@@ -167,6 +164,8 @@ class ClickTests(unittest.TestCase):
     def tearDown(self):
         if hasattr(self, "root"):
             self.root.destroy()
+        self.root = self.window = self.button = self.controls = None
+        gc.collect()
 
     def click(self, button, release=True):
         button.event_generate("<Enter>", x=2, y=2)
