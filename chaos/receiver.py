@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse
 
 from chaos.actions import ActionRequest, MoveRequest
@@ -19,20 +19,17 @@ class Receiver:
         self.engine = engine
         self.controls = controls
 
-        async def authorize(request: Request):
+        app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+        app.router.redirect_slashes = False
+
+        @app.middleware("http")
+        async def authorize(request: Request, call_next):
             authorization = request.headers.get("Authorization", "")
             if not hmac.compare_digest(
                 authorization.encode(), f"Bearer {key}".encode()
             ):
-                raise HTTPException(status_code=401, detail="unauthorized")
-
-        app = FastAPI(
-            docs_url=None,
-            redoc_url=None,
-            openapi_url=None,
-            dependencies=[Depends(authorize)],
-        )
-        app.router.redirect_slashes = False
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+            return await call_next(request)
 
         @app.post("/window/move")
         async def move(request: MoveRequest):

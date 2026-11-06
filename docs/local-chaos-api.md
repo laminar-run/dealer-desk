@@ -47,8 +47,8 @@ The following fresh click works, including when the consumed release escaped the
 This affects primary Tk client controls only, excluding titlebars, native dialogs, UIA Invoke, and other processes.
 Unavailable targets and failed effects are asynchronous failures logged by the engine.
 
-Authentication failures return HTTP 401 with `{"detail":"unauthorized"}`.
-FastAPI returns HTTP 422 for invalid request bodies and its own 404 and 405 bodies for unknown routes and unsupported methods.
+Authentication failures return HTTP 401 with `{"detail":"unauthorized"}` before reading the body, including for unknown routes and unsupported methods.
+Authenticated requests receive HTTP 422 for invalid request bodies and FastAPI's own 404 and 405 bodies for unknown routes and unsupported methods.
 HTTP 503 with `{"status":"rejected","code":"busy"}` or `"shutting_down"` means admission failed.
 Uvicorn owns HTTP framing and parser rejections and supports persistent connections and chunked bodies.
 The API adds no body-size limit or body-read deadline.
