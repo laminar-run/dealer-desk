@@ -4,21 +4,16 @@ import queue
 import socket
 import threading
 import time
+from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-ROUTES = {
-    "/window/move": {"timeoutMs", "x", "y"},
-    "/window/minimize": {"timeoutMs"},
-    "/input/ignore-next-click": {"timeoutMs"},
-    "/dms/critical-error": {"timeoutMs"},
-}
+from chaos.actions import Prepare, Result
 
 
 class Work:
-    def __init__(self, route, parameters):
-        self.route = route
-        self.parameters = parameters
-        self.deadline = time.monotonic() + parameters["timeoutMs"] / 1000
+    def __init__(self, invoke: Callable[[], Result], timeout_ms: int):
+        self.invoke = invoke
+        self.deadline = time.monotonic() + timeout_ms / 1000
         self.state = "pending"
         self.result = None
         self.finished_at = None
@@ -64,7 +59,7 @@ class Work:
 
 
 class Receiver:
-    def __init__(self, root, key, actions):
+    def __init__(self, root, key, actions: Mapping[str, Prepare]):
         self.root = root
         self.key = key
         self.actions = actions
@@ -135,7 +130,7 @@ class Receiver:
             authorization.encode(), f"Bearer {self.key}".encode()
         ):
             return 401, "rejected", "unauthorized"
-        if request.path not in ROUTES:
+        if request.path not in self.actions:
             return 404, "rejected", "unknown_route"
         try:
             length = int(request.headers.get("Content-Length", "-1"))
@@ -146,22 +141,16 @@ class Receiver:
             if request.headers.get_content_type() != "application/json":
                 raise ValueError
             parameters = json.loads(request.rfile.read(length))
-            if (
-                not isinstance(parameters, dict)
-                or set(parameters) != ROUTES[request.path]
-            ):
+            if not isinstance(parameters, dict):
                 raise ValueError
-            if any(type(value) is not int for value in parameters.values()):
-                raise ValueError
-            if not 1 <= parameters["timeoutMs"] <= 30000:
-                raise ValueError
-            if any(
-                not -(2**31) <= parameters[k] < 2**31
-                for k in ("x", "y")
-                if k in parameters
-            ):
+            timeout_ms = parameters.pop("timeoutMs", None)
+            if type(timeout_ms) is not int or not 1 <= timeout_ms <= 30000:
                 raise ValueError
         except (ValueError, UnicodeError, RecursionError):
+            return 400, "rejected", "invalid_request"
+        try:
+            invoke = self.actions[request.path](parameters)
+        except ValueError:
             return 400, "rejected", "invalid_request"
         request.read_timer.cancel()
         request.read_timer.join()
@@ -170,7 +159,7 @@ class Receiver:
         with self.admission:
             if self.closed:
                 return 503, "rejected", "shutting_down"
-            work = Work(request.path, parameters)
+            work = Work(invoke, timeout_ms)
             try:
                 self.pending.put_nowait(work)
             except queue.Full:
@@ -184,7 +173,7 @@ class Receiver:
             work = None
         if work and work.start():
             try:
-                result = self.actions[work.route](work.parameters)
+                result = work.invoke()
             except Exception:
                 result = (500, "unknown", "action_failed")
             work.finish(result)

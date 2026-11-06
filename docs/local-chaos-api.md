@@ -21,7 +21,7 @@ A crashed instance leaves stale discovery that the next launch replaces with fre
 
 Send one POST with `Content-Type: application/json` and at most 2048 body bytes.
 Every body requires integer `timeoutMs` from 1 through 30000.
-Booleans and extra fields are rejected.
+Current actions reject booleans and unexpected fields.
 Routes are exact and lowercase.
 
 | Route | Additional fields | Completed effect |
@@ -58,6 +58,15 @@ A transport timeout has unknown outcome and does not cancel a request accepted l
 Send no automatic retries, including after unknown results.
 There are no receipts, IDs, deduplication, job callbacks, or immediate job-stop coupling.
 Enclosing job and recovery retries are unchanged.
+
+## Extend actions
+
+Define immutable parameter objects and their parsers in `chaos/actions.py`.
+Parsers accept the action fields without `timeoutMs` and raise `ValueError` for invalid keys or values.
+Bind each parser to its typed handler in the single `action_definitions` dictionary with `bind_action`.
+The receiver parses before queue admission and invokes the prepared handler on the Tk thread only after work starts.
+Handlers return the existing HTTP code, status, and optional reason tuple after confirming the effect.
+Update the request table when exposing or changing an action.
 
 ## Verification
 

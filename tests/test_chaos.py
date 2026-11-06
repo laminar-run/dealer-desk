@@ -4,26 +4,30 @@ import socket
 import sys
 import threading
 import time
+import tkinter as tk
 import unittest
-from types import SimpleNamespace
+from dataclasses import dataclass
 
+from chaos.actions import MoveParams, NoParams, bind_action, parse_move, parse_no_params
 from chaos.controls import Controls
 from chaos.receiver import Receiver, Work
 
 
 class ReceiverTests(unittest.TestCase):
     def setUp(self):
-        self.root = SimpleNamespace(
-            after=lambda *args: "poll", after_cancel=lambda *args: None
-        )
+        self.root = tk.Tcl()
         self.effects = []
+
+        def record_effect(parameters):
+            self.effects.append(parameters)
+            return 200, "completed", None
+
         self.server = Receiver(
             self.root,
             "test-key",
             {
-                "/window/minimize": lambda parameters: (
-                    self.effects.append(parameters) or (200, "completed", None)
-                )
+                "/window/minimize": bind_action(parse_no_params, record_effect),
+                "/window/move": bind_action(parse_move, record_effect),
             },
         )
 
@@ -69,20 +73,58 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(self.effects, [])
 
     def test_completed_http_waits_for_effect_and_started_timeout_is_unknown(self):
+        @dataclass(frozen=True)
+        class MessageParams:
+            message: str
+
+        parsed = []
+
+        def parse_message(parameters):
+            if set(parameters) != {"message"} or type(parameters["message"]) is not str:
+                raise ValueError
+            result = MessageParams(parameters["message"])
+            parsed.append((result, threading.get_ident()))
+            return result
+
+        def show_message(parameters: MessageParams):
+            self.assertEqual(responses, [])
+            self.root.eval("info patchlevel")
+            self.effects.append((parameters, threading.get_ident()))
+            return 200, "completed", None
+
+        self.server.actions = {
+            "/test/message": bind_action(parse_message, show_message)
+        }
+        self.assertEqual(
+            self.request({"timeoutMs": 500, "message": 42}, route="/test/message")[0],
+            400,
+        )
+        self.assertTrue(self.server.pending.empty())
+        self.assertEqual(self.effects, [])
         responses = []
         caller = threading.Thread(
-            target=lambda: responses.append(self.request({"timeoutMs": 500}))
+            target=lambda: responses.append(
+                self.request(
+                    {"timeoutMs": 500, "message": "Hello"}, route="/test/message"
+                )
+            )
         )
         caller.start()
         work = self.server.pending.get(timeout=1)
         self.assertEqual(responses, [])
         self.server.pending.put_nowait(work)
-        self.server._drain()
+        deadline = time.monotonic() + 1
+        while not responses and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.001)
         caller.join(1)
-        self.assertEqual(self.effects, [{"timeoutMs": 500}])
+        self.assertEqual(self.effects, [(parsed[0][0], threading.get_ident())])
+        self.assertIs(self.effects[0][0], parsed[0][0])
+        self.assertEqual(self.effects[0][0], MessageParams("Hello"))
+        self.assertEqual(parsed[0][1], self.server.thread.ident)
         self.assertEqual(responses, [(200, {"status": "completed"})])
         for result in ((200, "completed", None), (409, "rejected", "already_armed")):
-            work = Work("/window/minimize", {"timeoutMs": 50})
+            work = Work(lambda result=result: result, 50)
             self.assertTrue(work.start())
             self.assertEqual(work.wait(), (504, "unknown", "action_running"))
             self.assertFalse(work.start())
@@ -93,7 +135,7 @@ class ReceiverTests(unittest.TestCase):
 
     def test_start_expiry_race_has_one_winner(self):
         for _ in range(100):
-            work = Work("/window/minimize", {"timeoutMs": 1})
+            work = Work(lambda: (200, "completed", None), 1)
             barrier = threading.Barrier(2)
             started = []
 
@@ -114,7 +156,7 @@ class ReceiverTests(unittest.TestCase):
             else:
                 self.assertTrue(started)
                 self.assertIn(result[1], ("completed", "unknown"))
-        work = Work("/window/minimize", {"timeoutMs": 1})
+        work = Work(lambda: (200, "completed", None), 1)
         while time.monotonic() < work.deadline:
             time.sleep(0.001)
         self.assertFalse(work.start())
@@ -190,15 +232,17 @@ class ClickTests(unittest.TestCase):
 
     def test_widget_press_and_button_release_are_swallowed_once(self):
         self.button.bind("<ButtonPress-1>", lambda event: self.calls.append("press"))
-        self.assertEqual(self.controls.ignore_next_click({})[0], 200)
-        self.assertEqual(self.controls.ignore_next_click({})[2], "already_armed")
+        self.assertEqual(self.controls.ignore_next_click(NoParams())[0], 200)
+        self.assertEqual(
+            self.controls.ignore_next_click(NoParams())[2], "already_armed"
+        )
         self.click(self.button)
         self.assertEqual(self.calls, [])
         self.click(self.button)
         self.assertEqual(self.calls, ["press", "command"])
 
     def test_dynamic_widget_lost_release_and_other_modal(self):
-        self.controls.ignore_next_click({})
+        self.controls.ignore_next_click(NoParams())
         dynamic = self.tk.Button(
             self.window, text="New", command=lambda: self.calls.append("dynamic")
         )
@@ -210,10 +254,12 @@ class ClickTests(unittest.TestCase):
         self.assertEqual(self.calls, ["dynamic"])
         modal = self.tk.Toplevel(self.root)
         modal.grab_set()
-        self.assertEqual(self.controls.ignore_next_click({})[2], "no_eligible_window")
+        self.assertEqual(
+            self.controls.ignore_next_click(NoParams())[2], "no_eligible_window"
+        )
         modal.destroy()
         self.window.grab_set()
-        self.assertEqual(self.controls.ignore_next_click({})[0], 200)
+        self.assertEqual(self.controls.ignore_next_click(NoParams())[0], 200)
 
     def test_minimize_and_move_restore_preserve_client_size(self):
         import win32con
@@ -228,9 +274,9 @@ class ClickTests(unittest.TestCase):
                 self.root.update()
                 hwnd = win32gui.GetAncestor(self.window.winfo_id(), win32con.GA_ROOT)
                 self.assertEqual(self.window.state(), state)
-                self.assertEqual(self.controls.minimize({})[0], 200)
+                self.assertEqual(self.controls.minimize(NoParams())[0], 200)
                 self.assertTrue(win32gui.IsIconic(hwnd))
-                self.assertEqual(self.controls.move({"x": 140, "y": 110})[0], 200)
+                self.assertEqual(self.controls.move(MoveParams(140, 110))[0], 200)
                 self.root.update()
                 self.assertFalse(win32gui.IsIconic(hwnd))
                 self.assertEqual(win32gui.GetWindowRect(hwnd)[:2], (140, 110))

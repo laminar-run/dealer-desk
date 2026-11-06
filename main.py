@@ -70,18 +70,13 @@ def main():
     try:
         if os.name == "nt":
             import secrets
+            from chaos.actions import action_definitions
             from chaos.publication import Publication
             from chaos.receiver import Receiver
-            from chaos.scenarios import inject_critical_error
 
             publication = Publication()
             key = secrets.token_urlsafe(32)
-            receiver = Receiver(root, key, {
-                "/window/move": controls.move,
-                "/window/minimize": controls.minimize,
-                "/input/ignore-next-click": controls.ignore_next_click,
-                "/dms/critical-error": lambda parameters: inject_critical_error(root),
-            })
+            receiver = Receiver(root, key, action_definitions(root, controls))
             publication.publish(receiver.http.server_port, key)
         _launch_login(root, controls)
         root.mainloop()

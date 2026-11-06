@@ -1,3 +1,6 @@
+from chaos.actions import MoveParams, NoParams, Result
+
+
 class Controls:
     def __init__(self, root):
         self.root = root
@@ -46,7 +49,7 @@ class Controls:
         if self.click == "consuming":
             return "break"
 
-    def ignore_next_click(self, parameters):
+    def ignore_next_click(self, parameters: NoParams) -> Result:
         if not self._eligible():
             return 409, "rejected", "no_eligible_window"
         if self.click != "disarmed":
@@ -55,13 +58,13 @@ class Controls:
         self.click = "armed"
         return 200, "completed", None
 
-    def move(self, parameters):
+    def move(self, parameters: MoveParams) -> Result:
         return self._window_action(parameters)
 
-    def minimize(self, parameters):
-        return self._window_action(parameters, minimize=True)
+    def minimize(self, parameters: NoParams) -> Result:
+        return self._window_action(None)
 
-    def _window_action(self, parameters, minimize=False):
+    def _window_action(self, parameters: MoveParams | None) -> Result:
         import win32con
         import win32gui
 
@@ -69,7 +72,7 @@ class Controls:
         if not window:
             return 409, "rejected", "no_eligible_window"
         hwnd = win32gui.GetAncestor(window.winfo_id(), win32con.GA_ROOT)
-        if minimize:
+        if parameters is None:
             window.iconify()
             confirmed = win32gui.IsIconic(hwnd)
         else:
@@ -78,16 +81,16 @@ class Controls:
             win32gui.SetWindowPos(
                 hwnd,
                 0,
-                parameters["x"],
-                parameters["y"],
+                parameters.x,
+                parameters.y,
                 0,
                 0,
                 win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE,
             )
             normal = win32gui.GetWindowPlacement(hwnd)[1] == win32con.SW_SHOWNORMAL
             confirmed = normal and win32gui.GetWindowRect(hwnd)[:2] == (
-                parameters["x"],
-                parameters["y"],
+                parameters.x,
+                parameters.y,
             )
         if confirmed:
             return 200, "completed", None
