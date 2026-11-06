@@ -1,8 +1,16 @@
 """ChaosEngine singleton - reads settings from DB and fires scenarios."""
-import threading
+
+import logging
+import queue
 import random
+import threading
+import time
+import tkinter as tk
+from collections.abc import Callable
+
 from db.connection import get_connection
 
+logger = logging.getLogger(__name__)
 _engine_instance = None
 
 
@@ -49,7 +57,56 @@ class ChaosEngine:
         self.on_logout = on_logout
         self._timer = None
         self._running = False
+        self.pending: queue.Queue[tuple[float, Callable[[], None]]] = queue.Queue(
+            maxsize=1
+        )
+        self.closed = False
+        self._admission = threading.Lock()
+        self._poll = root.after(10, self._drain)
         set_engine(self)
+
+    def submit(self, callback: Callable[[], None], timeout_ms: int) -> str | None:
+        with self._admission:
+            if self.closed:
+                return "shutting_down"
+            try:
+                self.pending.put_nowait(
+                    (time.monotonic() + timeout_ms / 1000, callback)
+                )
+            except queue.Full:
+                return "busy"
+
+    def _drain(self):
+        try:
+            deadline, callback = self.pending.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            if time.monotonic() < deadline:
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("Chaos action failed")
+        if not self.closed:
+            self._poll = self.root.after(10, self._drain)
+
+    def close(self):
+        with self._admission:
+            if self.closed:
+                return
+            self.closed = True
+            try:
+                self.pending.get_nowait()
+            except queue.Empty:
+                pass
+        self.stop()
+        try:
+            self.root.after_cancel(self._poll)
+        except tk.TclError:
+            pass
+        self.root = None
+        self.on_logout = None
+        set_engine(None)
 
     def start(self):
         self._running = True
@@ -98,6 +155,7 @@ class ChaosEngine:
     def fire(self, scenario_key: str):
         """Immediately execute a named scenario."""
         import importlib
+
         dotted = SCENARIO_MAP.get(scenario_key)
         if not dotted:
             return

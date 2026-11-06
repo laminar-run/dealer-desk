@@ -1,6 +1,3 @@
-from chaos.actions import MoveParams, NoParams, Result
-
-
 class Controls:
     def __init__(self, root):
         self.root = root
@@ -49,49 +46,36 @@ class Controls:
         if self.click == "consuming":
             return "break"
 
-    def ignore_next_click(self, parameters: NoParams) -> Result:
+    def ignore_next_click(self) -> None:
         if not self._eligible():
-            return 409, "rejected", "no_eligible_window"
+            raise RuntimeError("no_eligible_window")
         if self.click != "disarmed":
-            return 409, "rejected", "already_armed"
+            raise RuntimeError("already_armed")
         self._tag(self.root)
         self.click = "armed"
-        return 200, "completed", None
 
-    def move(self, parameters: MoveParams) -> Result:
-        return self._window_action(parameters)
+    def minimize(self) -> None:
+        window = self._eligible()
+        if not window:
+            raise RuntimeError("no_eligible_window")
+        window.iconify()
 
-    def minimize(self, parameters: NoParams) -> Result:
-        return self._window_action(None)
-
-    def _window_action(self, parameters: MoveParams | None) -> Result:
+    def move(self, x: int, y: int) -> None:
         import win32con
         import win32gui
 
         window = self._eligible()
         if not window:
-            return 409, "rejected", "no_eligible_window"
+            raise RuntimeError("no_eligible_window")
         hwnd = win32gui.GetAncestor(window.winfo_id(), win32con.GA_ROOT)
-        if parameters is None:
-            window.iconify()
-            confirmed = win32gui.IsIconic(hwnd)
-        else:
-            window.deiconify()
-            window.state("normal")
-            win32gui.SetWindowPos(
-                hwnd,
-                0,
-                parameters.x,
-                parameters.y,
-                0,
-                0,
-                win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE,
-            )
-            normal = win32gui.GetWindowPlacement(hwnd)[1] == win32con.SW_SHOWNORMAL
-            confirmed = normal and win32gui.GetWindowRect(hwnd)[:2] == (
-                parameters.x,
-                parameters.y,
-            )
-        if confirmed:
-            return 200, "completed", None
-        return 500, "unknown", "effect_unconfirmed"
+        window.deiconify()
+        window.state("normal")
+        win32gui.SetWindowPos(
+            hwnd,
+            0,
+            x,
+            y,
+            0,
+            0,
+            win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE,
+        )

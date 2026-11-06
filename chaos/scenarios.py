@@ -412,14 +412,6 @@ def scenario_critical_error(root=None):
         r.after(0, lambda: show_critical_error(r))
 
 
-def inject_critical_error(root):
-    win = show_critical_error(root)
-    win.update_idletasks()
-    if win.winfo_ismapped() and win.grab_current() == win:
-        return 200, "completed", None
-    return 500, "unknown", "effect_unconfirmed"
-
-
 def scenario_field_corruption(root=None):
     """Appends garbage characters to a focused text entry."""
     r = root or _root()

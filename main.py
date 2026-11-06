@@ -1,4 +1,5 @@
 """DealerDesk 98 - Entry Point."""
+
 import os
 import sys
 
@@ -8,45 +9,40 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import tkinter as tk
+
 from db.connection import init_db
 from db.seed import seed
 
 
-def _launch_login(root: tk.Tk, controls):
+def _launch_login(root: tk.Tk, controls, engine):
     from ui.login import LoginWindow
+
+    engine.stop()
+    engine.on_logout = None
 
     def on_login_success(user: dict):
         from ui.dashboard import DashboardWindow
-        from chaos.engine import ChaosEngine
 
-        dashboard = DashboardWindow(root, user, on_logout=lambda: _launch_login(root, controls))
+        dashboard = DashboardWindow(
+            root, user, on_logout=lambda: _launch_login(root, controls, engine)
+        )
 
         controls.set_primary(dashboard)
-        engine = ChaosEngine(root, on_logout=lambda: _kick_to_login(dashboard, root, controls))
-        if _get_chaos_setting("master_enabled") == "1":
-            engine.start()
+        engine.on_logout = lambda: _kick_to_login(dashboard, root, controls, engine)
+        engine.reload()
 
-    login = LoginWindow(root, on_success=on_login_success, on_primary=controls.set_primary)
+    login = LoginWindow(
+        root, on_success=on_login_success, on_primary=controls.set_primary
+    )
     controls.set_primary(login)
 
 
-def _kick_to_login(dashboard, root, controls):
+def _kick_to_login(dashboard, root, controls, engine):
     try:
         dashboard.destroy()
     except Exception:
         pass
-    _launch_login(root, controls)
-
-
-def _get_chaos_setting(key):
-    try:
-        from db.connection import get_connection
-        conn = get_connection()
-        row = conn.execute("SELECT value FROM chaos_settings WHERE key=?", (key,)).fetchone()
-        conn.close()
-        return row["value"] if row else "0"
-    except Exception:
-        return "0"
+    _launch_login(root, controls, engine)
 
 
 def main():
@@ -64,27 +60,34 @@ def main():
             pass
 
     from chaos.controls import Controls
+    from chaos.engine import ChaosEngine
+
     controls = Controls(root)
+    engine = ChaosEngine(root)
     publication = None
     receiver = None
     try:
         if os.name == "nt":
             import secrets
-            from chaos.actions import action_definitions
+
             from chaos.publication import Publication
             from chaos.receiver import Receiver
 
             publication = Publication()
             key = secrets.token_urlsafe(32)
-            receiver = Receiver(root, key, action_definitions(root, controls))
+            receiver = Receiver(engine, key, controls)
             publication.publish(receiver.port, key)
-        _launch_login(root, controls)
+        _launch_login(root, controls, engine)
         root.mainloop()
     finally:
-        if receiver:
-            receiver.close()
-        if publication:
-            publication.close()
+        engine.close()
+        controls.set_primary(None)
+        try:
+            if receiver:
+                receiver.close()
+        finally:
+            if publication:
+                publication.close()
 
 
 if __name__ == "__main__":

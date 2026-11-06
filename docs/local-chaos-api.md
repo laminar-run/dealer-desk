@@ -17,59 +17,63 @@ The session path prevents accidental routing across sessions, not malicious same
 Shutdown removes discovery while holding a session-local named mutex.
 A crashed instance leaves stale discovery that the next launch replaces with fresh credentials.
 
-## Requests and results
+## Requests and acceptance
 
-Send one POST with `Content-Type: application/json` and at most 2048 body bytes.
+Send one POST with `Content-Type: application/json`.
 Every body requires integer `timeoutMs` from 1 through 30000 and rejects booleans and unexpected fields.
 Routes use lowercase paths without slash redirects or query-based action fields.
 
-| Route | Additional fields | Completed effect |
+| Route | Additional fields | Scheduled effect |
 | --- | --- | --- |
-| `/window/move` | Signed 32-bit integer `x`, `y` | Restore the primary window, then confirm its actual outer position in screen coordinates. |
-| `/window/minimize` | None | Confirm the primary window is iconic. |
+| `/window/move` | Signed 32-bit integer `x`, `y` | Restore and move the primary window to outer screen coordinates. |
+| `/window/minimize` | None | Minimize the primary window. |
 | `/input/ignore-next-click` | None | Arm one left press and release suppression. |
-| `/dms/critical-error` | None | Observe the existing critical-error dialog mapped with its modal grab. |
+| `/dms/critical-error` | None | Show the existing critical-error dialog. |
+
+HTTP 202 with `{"status":"accepted"}` means the engine admitted the callback to its one pending slot.
+The callback runs on the Tk thread even when random chaos is disabled.
+Acceptance does not confirm execution or the resulting UI state.
+The engine drops a callback if its deadline has passed before execution starts.
+A started callback runs without a completion deadline.
+Failed callbacks are logged, and polling continues.
+There is no completion wait, result store, or subsequent result endpoint.
 
 Shared controls target the explicit current login, second-factor, or dashboard Toplevel.
-Window state changes use Tk's window manager so minimize and restore preserve its client geometry; native Win32 observations confirm the resulting state and outer position.
+Window state changes use Tk's window manager so minimize and restore preserve its client geometry.
 The login's own grab is eligible; another modal prevents shared controls until dismissed.
 Click suppression runs before widget and class bindings, including dynamically mapped widgets.
-Completed means armed, not consumed.
-A second arm is rejected while armed or consuming.
+A second arm fails while armed or consuming.
 The following fresh click works, including when the consumed release escaped the app.
 This affects primary Tk client controls only, excluding titlebars, native dialogs, UIA Invoke, and other processes.
+Unavailable targets and failed effects are asynchronous failures logged by the engine.
 
-Responses contain `status` and an optional `code`.
-HTTP 200 has `status: completed`.
-Action rejections use 400 `invalid_request`, 401 `unauthorized`, 409 `no_eligible_window` or `already_armed`, 413 `body_too_large`, or 503 `busy` or `shutting_down`.
-FastAPI returns its own 404 and 405 bodies for unknown routes and unsupported methods before action authentication.
-Uvicorn owns HTTP framing and parser rejections and supports persistent connections and chunked bodies within the 2048-byte limit.
-Pending expiry returns 504 with `status: rejected` and `code: expired`; it cannot execute later.
-A started effect unconfirmed at its deadline returns 504 with `status: unknown` and `code: action_running`.
-Other execution failures return 500 with `status: unknown` and `code: action_failed` or `effect_unconfirmed`.
+Authentication failures return HTTP 401 with `{"detail":"unauthorized"}`.
+FastAPI returns HTTP 422 for invalid request bodies and its own 404 and 405 bodies for unknown routes and unsupported methods.
+HTTP 503 with `{"status":"rejected","code":"busy"}` or `"shutting_down"` means admission failed.
+Uvicorn owns HTTP framing and parser rejections and supports persistent connections and chunked bodies.
+The API adds no body-size limit or body-read deadline.
+Incomplete clients do not block other requests, and server shutdown cancels remaining requests.
 
-`timeoutMs` begins after complete request admission and validation and uses a monotonic clock.
-The body must arrive within two seconds after the endpoint begins reading it.
-Incomplete headers have no two-second deadline and do not block other clients.
-Shutdown closes admission, cancels pending work, and stops the embedded server before removing discovery.
+`timeoutMs` begins after complete request validation and uses a monotonic clock.
+Shutdown closes admission, drops pending callbacks, and stops the embedded server before removing discovery.
 Use a socket timeout of `timeoutMs / 1000 + 3` seconds within a longer ordinary RPA step timeout.
 A transport timeout has unknown outcome and does not cancel a request accepted later.
-Send no automatic retries, including after unknown results.
+Send no automatic retries.
 There are no receipts, IDs, deduplication, job callbacks, or immediate job-stop coupling.
 Enclosing job and recovery retries are unchanged.
+The verification job must observe the expected dialog or window state before continuing.
 
 ## Extend actions
 
-Define immutable parameter objects and their parsers in `chaos/actions.py`.
-Parsers accept the action fields without `timeoutMs` and raise `ValueError` for invalid keys or values.
-Bind each parser to its typed handler in the single `action_definitions` dictionary with `bind_action`.
-The receiver parses before queue admission and invokes the prepared handler on the Tk thread only after work starts.
-Handlers return the existing HTTP code, status, and optional reason tuple after confirming the effect.
+Define strict request fields in `chaos/actions.py` by extending `ActionRequest`.
+Add a typed FastAPI route in `chaos/receiver.py` and pass its Tk callback to `_accept`.
+The existing engine checks the deadline immediately before calling the handler on Tk.
+Handlers perform the effect or raise an exception; they do not return HTTP results or confirm effects.
 Update the request table when exposing or changing an action.
 
 ## Verification
 
-Run `python -m unittest discover -s tests` for HTTP admission, deadline races, and Tk click regressions.
+Run `python -m unittest discover -s tests` for HTTP acceptance, validation, expiry, callback failures, and Tk click regressions.
 Tk checks run on Windows, require a graphical display, and report a skip when unavailable.
 Windows acceptance must also exercise login/TFA/dashboard targeting, restored multi-monitor movement, minimization, critical-dialog visibility, and physical clicks on new widgets.
 Inspect directory/file ACLs and prove a different standard user cannot read discovery.
