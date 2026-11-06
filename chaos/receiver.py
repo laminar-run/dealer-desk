@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import json
 import queue
@@ -5,7 +6,11 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Mapping
-from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import uvicorn
+from fastapi import FastAPI, Request
+from starlette.requests import ClientDisconnect
+from starlette.responses import JSONResponse
 
 from chaos.actions import Prepare, Result
 
@@ -66,95 +71,88 @@ class Receiver:
         self.pending = queue.Queue(maxsize=1)
         self.closed = False
         self.admission = threading.Lock()
-        owner = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def setup(self):
-                super().setup()
-                self.connection.settimeout(2)
-                self.read_deadline = time.monotonic() + 2
-                self.read_timer = threading.Timer(2, self.expire_read)
-                self.read_timer.start()
-
-            def expire_read(self):
-                try:
-                    self.connection.shutdown(socket.SHUT_RD)
-                except OSError:
-                    pass
-
-            def finish(self):
-                self.read_timer.cancel()
-                self.read_timer.join()
-                super().finish()
-
-            def log_message(self, *args):
-                pass
-
-            def send_error(self, code, message=None, explain=None):
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Connection", "close")
-                self.end_headers()
-                self.wfile.write(b'{"status":"rejected","code":"invalid_request"}')
-                self.close_connection = True
-
-            def do_POST(self):
-                try:
-                    result = owner.accept(self)
-                    code, status, reason = result
-                    body = {"status": status}
-                    if reason:
-                        body["code"] = reason
-                    payload = json.dumps(body).encode()
-                    self.send_response(code)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    self.wfile.write(payload)
-                except (OSError, TimeoutError):
-                    pass
-                finally:
-                    self.close_connection = True
-
-        self.http = HTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(
-            target=lambda: self.http.serve_forever(poll_interval=0.05), daemon=True
+        app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+        app.router.redirect_slashes = False
+        for path in actions:
+            app.add_api_route(path, self.accept, methods=["POST"])
+        config = uvicorn.Config(
+            app,
+            loop="asyncio",
+            ws="none",
+            lifespan="off",
+            proxy_headers=False,
+            access_log=False,
+            log_config=None,
+            timeout_graceful_shutdown=0.5,
         )
-        self.thread.start()
+        self.server = uvicorn.Server(config)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.startup_error = None
+        try:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            self.socket.bind(("127.0.0.1", 0))
+            self.port = self.socket.getsockname()[1]
+            self.thread = threading.Thread(target=self._serve, daemon=True)
+            self.thread.start()
+            deadline = time.monotonic() + 5
+            while not self.server.started and self.thread.is_alive():
+                if time.monotonic() >= deadline:
+                    break
+                self.thread.join(0.01)
+            if not self.server.started:
+                self.server.should_exit = True
+                self.thread.join(2)
+                raise RuntimeError("Chaos startup failed") from self.startup_error
+        except BaseException:
+            self.socket.close()
+            self.root = None
+            self.actions = {}
+            raise
         self.poll = root.after(10, self._drain)
 
-    def accept(self, request):
+    def _serve(self):
+        try:
+            with self.socket:
+                self.server.run(sockets=[self.socket])
+        except BaseException as error:
+            self.startup_error = error
+
+    async def _body(self, request):
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 2048:
+                raise OverflowError
+            body.extend(chunk)
+        return body
+
+    async def accept(self, request: Request):
+        code, status, reason = await self._accept(request)
+        body = {"status": status}
+        if reason:
+            body["code"] = reason
+        return JSONResponse(body, status_code=code)
+
+    async def _accept(self, request):
         authorization = request.headers.get("Authorization", "")
         if not hmac.compare_digest(
             authorization.encode(), f"Bearer {self.key}".encode()
         ):
             return 401, "rejected", "unauthorized"
-        if request.path not in self.actions:
-            return 404, "rejected", "unknown_route"
         try:
-            length = int(request.headers.get("Content-Length", "-1"))
-            if length > 2048:
-                return 413, "rejected", "body_too_large"
-            if length < 0 or request.headers.get("Transfer-Encoding"):
+            media_type = request.headers.get("Content-Type", "").split(";", 1)[0]
+            if media_type.strip().lower() != "application/json":
                 raise ValueError
-            if request.headers.get_content_type() != "application/json":
-                raise ValueError
-            parameters = json.loads(request.rfile.read(length))
+            parameters = json.loads(await asyncio.wait_for(self._body(request), 2))
             if not isinstance(parameters, dict):
                 raise ValueError
             timeout_ms = parameters.pop("timeoutMs", None)
             if type(timeout_ms) is not int or not 1 <= timeout_ms <= 30000:
                 raise ValueError
-        except (ValueError, UnicodeError, RecursionError):
-            return 400, "rejected", "invalid_request"
-        try:
-            invoke = self.actions[request.path](parameters)
-        except ValueError:
-            return 400, "rejected", "invalid_request"
-        request.read_timer.cancel()
-        request.read_timer.join()
-        if time.monotonic() >= request.read_deadline:
+            invoke = self.actions[request.url.path](parameters)
+        except OverflowError:
+            return 413, "rejected", "body_too_large"
+        except (ValueError, RecursionError, asyncio.TimeoutError, ClientDisconnect):
             return 400, "rejected", "invalid_request"
         with self.admission:
             if self.closed:
@@ -164,7 +162,7 @@ class Receiver:
                 self.pending.put_nowait(work)
             except queue.Full:
                 return 503, "rejected", "busy"
-        return work.wait()
+        return await asyncio.to_thread(work.wait)
 
     def _drain(self):
         try:
@@ -188,6 +186,9 @@ class Receiver:
             except queue.Empty:
                 pass
         self.root.after_cancel(self.poll)
-        self.http.shutdown()
-        self.http.server_close()
-        self.thread.join()
+        self.server.should_exit = True
+        self.thread.join(2)
+        if self.thread.is_alive():
+            raise RuntimeError("Chaos listener failed to stop")
+        self.root = None
+        self.actions = {}

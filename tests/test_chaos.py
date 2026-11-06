@@ -34,15 +34,15 @@ class ReceiverTests(unittest.TestCase):
     def tearDown(self):
         self.server.close()
 
-    def request(self, body, key="test-key", route="/window/minimize"):
+    def request(self, body, key="test-key", route="/window/minimize", chunked=False):
         connection = http.client.HTTPConnection(
-            "127.0.0.1", self.server.http.server_port, timeout=3
+            "127.0.0.1", self.server.port, timeout=3
         )
         try:
             connection.request(
                 "POST",
                 route,
-                body=json.dumps(body),
+                body=[json.dumps(body).encode()] if chunked else json.dumps(body),
                 headers={
                     "Authorization": f"Bearer {key}",
                     "Content-Type": "application/json",
@@ -55,6 +55,12 @@ class ReceiverTests(unittest.TestCase):
 
     def test_auth_validation_and_expired_http_never_execute(self):
         for body, key, route, code in [
+            (
+                {"timeoutMs": 5, "extra": "x" * 2048},
+                "test-key",
+                "/window/minimize",
+                413,
+            ),
             ({"timeoutMs": 5}, "wrong", "/window/minimize", 401),
             ({"timeoutMs": True}, "test-key", "/window/minimize", 400),
             ({"timeoutMs": 30001}, "test-key", "/window/minimize", 400),
@@ -69,6 +75,9 @@ class ReceiverTests(unittest.TestCase):
             self.request({"timeoutMs": 5}),
             (504, {"status": "rejected", "code": "expired"}),
         )
+        self.server._drain()
+        self.assertEqual(self.effects, [])
+        self.assertEqual(self.request({"timeoutMs": 5}, chunked=True)[0], 504)
         self.server._drain()
         self.assertEqual(self.effects, [])
 
@@ -92,9 +101,12 @@ class ReceiverTests(unittest.TestCase):
             self.effects.append((parameters, threading.get_ident()))
             return 200, "completed", None
 
-        self.server.actions = {
-            "/test/message": bind_action(parse_message, show_message)
-        }
+        self.server.close()
+        self.server = Receiver(
+            self.root,
+            "test-key",
+            {"/test/message": bind_action(parse_message, show_message)},
+        )
         self.assertEqual(
             self.request({"timeoutMs": 500, "message": 42}, route="/test/message")[0],
             400,
@@ -162,39 +174,26 @@ class ReceiverTests(unittest.TestCase):
         self.assertFalse(work.start())
         self.assertEqual(work.wait(), (504, "rejected", "expired"))
 
-    def test_trickled_headers_and_body_release_the_serial_worker(self):
+    def test_slow_clients_do_not_block_other_requests_or_shutdown(self):
         for initial in (
-            b"POST /window/minimize HTTP/1.0\r\nX-Trickle: ",
+            b"POST /window/minimize HTTP/1.1\r\nX-Trickle: ",
             (
-                b"POST /window/minimize HTTP/1.0\r\nAuthorization: Bearer test-key\r\n"
+                b"POST /window/minimize HTTP/1.1\r\nAuthorization: Bearer test-key\r\n"
                 b"Content-Type: application/json\r\nContent-Length: 2048\r\n\r\n{"
             ),
         ):
-            with self.subTest(initial=initial):
-                responses = []
-                with socket.create_connection(self.server.http.server_address) as slow:
-                    slow.sendall(initial)
-                    caller = threading.Thread(
-                        target=lambda responses=responses: responses.append(
-                            self.request({"timeoutMs": 5})
-                        )
-                    )
-                    caller.start()
-                    deadline = time.monotonic() + 2.2
-                    while time.monotonic() < deadline:
-                        try:
-                            slow.sendall(b" ")
-                        except OSError:
-                            break
-                        time.sleep(0.05)
-                    caller.join(0.3)
-                    completed = responses[:]
-                caller.join(1)
-                self.assertEqual(
-                    completed, [(504, {"status": "rejected", "code": "expired"})]
-                )
+            with socket.create_connection(("127.0.0.1", self.server.port)) as slow:
+                slow.sendall(initial)
+                started = time.monotonic()
+                self.assertEqual(self.request({"timeoutMs": 5})[0], 504)
+                self.assertLess(time.monotonic() - started, 1)
                 self.server._drain()
                 self.assertEqual(self.effects, [])
+                if initial.endswith(b"{"):
+                    actions = self.server.actions
+                    self.server.close()
+                    self.assertFalse(self.server.thread.is_alive())
+                    self.server = Receiver(self.root, "test-key", actions)
 
 
 @unittest.skipUnless(sys.platform == "win32", "Requires Windows Tk mouse bindings")

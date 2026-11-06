@@ -1,7 +1,7 @@
 # Local chaos API
 
 DealerDesk starts its local testing listener with `python main.py` and the usual Windows shortcut.
-It uses the existing pywin32 dependency and no platform service registration.
+It uses pywin32 for Windows controls and an embedded FastAPI/Uvicorn listener, with no platform service registration.
 One instance per Windows session binds `127.0.0.1` on an OS-assigned ephemeral port.
 A second instance fails startup instead of replacing a live instance's discovery.
 Non-Windows launches retain the UI without this Windows listener.
@@ -20,9 +20,8 @@ A crashed instance leaves stale discovery that the next launch replaces with fre
 ## Requests and results
 
 Send one POST with `Content-Type: application/json` and at most 2048 body bytes.
-Every body requires integer `timeoutMs` from 1 through 30000.
-Current actions reject booleans and unexpected fields.
-Routes are exact and lowercase.
+Every body requires integer `timeoutMs` from 1 through 30000 and rejects booleans and unexpected fields.
+Routes use lowercase paths without slash redirects or query-based action fields.
 
 | Route | Additional fields | Completed effect |
 | --- | --- | --- |
@@ -42,17 +41,17 @@ This affects primary Tk client controls only, excluding titlebars, native dialog
 
 Responses contain `status` and an optional `code`.
 HTTP 200 has `status: completed`.
-Rejections use 400 `invalid_request`, 401 `unauthorized`, 404 `unknown_route`, 409 `no_eligible_window` or `already_armed`, 413 `body_too_large`, or 503 `busy` or `shutting_down`.
-Unsupported HTTP methods return 501 `invalid_request`.
-Malformed HTTP requests can use other parser rejection codes.
+Action rejections use 400 `invalid_request`, 401 `unauthorized`, 409 `no_eligible_window` or `already_armed`, 413 `body_too_large`, or 503 `busy` or `shutting_down`.
+FastAPI returns its own 404 and 405 bodies for unknown routes and unsupported methods before action authentication.
+Uvicorn owns HTTP framing and parser rejections and supports persistent connections and chunked bodies within the 2048-byte limit.
 Pending expiry returns 504 with `status: rejected` and `code: expired`; it cannot execute later.
 A started effect unconfirmed at its deadline returns 504 with `status: unknown` and `code: action_running`.
 Other execution failures return 500 with `status: unknown` and `code: action_failed` or `effect_unconfirmed`.
 
 `timeoutMs` begins after complete request admission and validation and uses a monotonic clock.
-Headers and body must arrive within two seconds of connection handling.
-This separate admission limit does not shorten accepted work's `timeoutMs`.
-The HTTP worker is serial; unread socket backlog is outside this duration.
+The body must arrive within two seconds after the endpoint begins reading it.
+Incomplete headers have no two-second deadline and do not block other clients.
+Shutdown closes admission, cancels pending work, and stops the embedded server before removing discovery.
 Use a socket timeout of `timeoutMs / 1000 + 3` seconds within a longer ordinary RPA step timeout.
 A transport timeout has unknown outcome and does not cancel a request accepted later.
 Send no automatic retries, including after unknown results.

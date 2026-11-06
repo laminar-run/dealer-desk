@@ -77,7 +77,7 @@ def main():
             publication = Publication()
             key = secrets.token_urlsafe(32)
             receiver = Receiver(root, key, action_definitions(root, controls))
-            publication.publish(receiver.http.server_port, key)
+            publication.publish(receiver.port, key)
         _launch_login(root, controls)
         root.mainloop()
     finally:

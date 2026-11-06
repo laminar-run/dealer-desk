@@ -8,7 +8,7 @@ realistic enterprise-app friction (fake freezes, error dialogs, session timeouts
 ## Run
 
 ```bash
-pip install -r requirements.txt          # pywin32, Pillow (desktop deps)
+pip install -r requirements.txt          # desktop and web dependencies
 python main.py                           # launches the Win98 desktop app
 python create_shortcut.py                # (Windows) puts "DealerDesk 98.lnk" on the Desktop
 ```
