@@ -5,9 +5,10 @@ from db.connection import get_connection
 
 
 class LoginWindow(tk.Toplevel):
-    def __init__(self, master, on_success):
+    def __init__(self, master, on_success, on_primary):
         super().__init__(master)
         self.on_success = on_success
+        self.on_primary = on_primary
         self.title("DealerDesk 98 - Login")
         self.resizable(False, False)
         self.configure(bg=style.BG)
@@ -79,7 +80,7 @@ class LoginWindow(tk.Toplevel):
             self.destroy()
             import tfa
             if getattr(tfa, "TFA_ENABLED", False):
-                TfaWindow(self.master, user, self.on_success)
+                self.on_primary(TfaWindow(self.master, user, self.on_success))
             else:
                 self.on_success(user)
         else:
