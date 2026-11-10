@@ -1,10 +1,22 @@
 import json
 import os
 from pathlib import Path
+import re
+
+
+def trial_local_appdata(namespace):
+    if not isinstance(namespace, str) or not re.fullmatch(r'[0-9a-f]{32}', namespace):
+        raise ValueError('trial publication namespace must be 32 lowercase hex characters')
+    return Path(os.environ['LOCALAPPDATA']) / 'Minicor/DealerDesk/trial-publications' / namespace
 
 
 class Publication:
-    def __init__(self):
+    def __init__(self, *, trial_namespace=None):
+        local_appdata = (trial_local_appdata(trial_namespace) if trial_namespace is not None
+                         else Path(os.environ['LOCALAPPDATA']))
+        mutex_name = r"Local\Minicor.DealerDesk.Chaos"
+        if trial_namespace is not None:
+            mutex_name += '.Trial.' + trial_namespace
         import ntsecuritycon
         import win32api
         import win32con
@@ -13,7 +25,7 @@ class Publication:
         import win32ts
 
         self.mutex = win32event.CreateMutex(
-            None, False, r"Local\Minicor.DealerDesk.Chaos"
+            None, False, mutex_name
         )
         if win32api.GetLastError() == 183:
             self.mutex.Close()
@@ -24,7 +36,7 @@ class Publication:
         try:
             session = win32ts.ProcessIdToSessionId(os.getpid())
             directory = (
-                Path(os.environ["LOCALAPPDATA"])
+                local_appdata
                 / "Minicor/DealerDesk/chaos"
                 / str(session)
             )
