@@ -35,12 +35,12 @@ def scenario_random_dialog(root=None):
     threading.Thread(target=_show, daemon=True).start()
 
 
-def scenario_fake_freeze(root=None, duration=None):
+def scenario_fake_freeze(root=None, duration_ms=None):
     """Disables all widgets for 3-10 seconds then re-enables."""
     r = root or _root()
     if not r:
         return
-    dur = duration if duration is not None else random.randint(3, 10)
+    dur = duration_ms if duration_ms is not None else random.randint(3000, 10000)
 
     def _collect_widgets(widget):
         widgets = []
@@ -74,7 +74,7 @@ def scenario_fake_freeze(root=None, duration=None):
                 except Exception:
                     pass
 
-        r.after(dur * 1000, _thaw)
+        r.after(dur, _thaw)
 
     threading.Thread(target=_freeze, daemon=True).start()
 

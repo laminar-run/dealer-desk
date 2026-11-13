@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse
 
-from chaos.actions import ActionRequest, MoveRequest
+from chaos.actions import ActionRequest, MoveRequest, ScenarioRequest
 from chaos.controls import Controls
 from chaos.engine import ChaosEngine
 from chaos.scenarios import show_critical_error
@@ -48,6 +48,13 @@ class Receiver:
         @app.post("/dms/critical-error")
         async def critical_error(request: ActionRequest):
             return self._accept(request, lambda: show_critical_error(self.engine.root))
+
+        @app.post("/dms/scenario")
+        async def scenario(request: ScenarioRequest):
+            extra = {"duration_ms": request.durationMs} if request.durationMs else {}
+            return self._accept(
+                request, lambda: self.engine.fire(request.scenario, **extra)
+            )
 
         config = uvicorn.Config(
             app,

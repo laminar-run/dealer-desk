@@ -29,6 +29,7 @@ Routes use lowercase paths without slash redirects or query-based action fields.
 | `/window/minimize` | None | Minimize the primary window. |
 | `/input/ignore-next-click` | None | Arm one left press and release suppression. |
 | `/dms/critical-error` | None | Show the existing critical-error dialog. |
+| `/dms/scenario` | `scenario`: one of `random_dialog`, `fake_freeze`, `session_timeout`, `unexpected_save`, `critical_error`, `field_corruption`, `save_failure`, `wrong_patient`, `bsod_overlay`, `slow_progress`. Optional integer `durationMs` from 1 through `DEALERDESK_FREEZE_MAX_MS` (default 60000), only with `fake_freeze`. | Start the scenario as the Settings "Fire Now" button does. Without `durationMs`, the freeze lasts a random 3 to 10 seconds. |
 
 HTTP 202 with `{"status":"accepted"}` means the engine admitted the callback to its one pending slot.
 The callback runs on the Tk thread even when random chaos is disabled.
