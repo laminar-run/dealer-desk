@@ -11,7 +11,7 @@ from db.connection import get_connection
 # (setting_key, display name, description) - keys match chaos.engine SCENARIO_MAP
 SCENARIOS = [
     ("random_dialog", "Random Dialog", "Pops 'DMS server connection lost' dialog (loops on Cancel)"),
-    ("fake_freeze", "Fake Freeze", "Freezes all widgets for 3-10 seconds"),
+    ("fake_freeze", "Fake Freeze", "Hangs the whole app for 3-10 seconds"),
     ("session_timeout", "Session Timeout", "Shows session expired, optionally logs out"),
     ("unexpected_save", "Unexpected Save Popup", "Shows spurious 'Record saved' message"),
     ("critical_error", "Critical Error Dialog", "Massive red ERROR popup with fake stack trace - Ignore/Retry/Report/OK"),
