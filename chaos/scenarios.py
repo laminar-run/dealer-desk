@@ -2,6 +2,7 @@
 import random
 import string
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox
 
@@ -35,48 +36,13 @@ def scenario_random_dialog(root=None):
     threading.Thread(target=_show, daemon=True).start()
 
 
-def scenario_fake_freeze(root=None, duration=None):
-    """Disables all widgets for 3-10 seconds then re-enables."""
+def scenario_fake_freeze(root=None, duration_ms=None):
+    """Blocks the Tk thread for 3-10 seconds, so the whole app hangs."""
     r = root or _root()
     if not r:
         return
-    dur = duration if duration is not None else random.randint(3, 10)
-
-    def _collect_widgets(widget):
-        widgets = []
-        try:
-            state = str(widget.cget("state"))
-            if state != "disabled":
-                widgets.append((widget, state))
-        except Exception:
-            pass
-        for child in widget.winfo_children():
-            widgets.extend(_collect_widgets(child))
-        return widgets
-
-    def _freeze():
-        r.after(0, _do_freeze)
-
-    def _do_freeze():
-        alive_widgets = _collect_widgets(r)
-        r.configure(cursor="wait")
-        for widget, _ in alive_widgets:
-            try:
-                widget.configure(state="disabled")
-            except Exception:
-                pass
-
-        def _thaw():
-            r.configure(cursor="")
-            for widget, orig_state in alive_widgets:
-                try:
-                    widget.configure(state=orig_state)
-                except Exception:
-                    pass
-
-        r.after(dur * 1000, _thaw)
-
-    threading.Thread(target=_freeze, daemon=True).start()
+    dur = duration_ms if duration_ms is not None else random.randint(3000, 10000)
+    r.after(0, lambda: time.sleep(dur / 1000))
 
 
 def scenario_session_timeout(root=None, on_logout=None):
