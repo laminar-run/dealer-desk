@@ -11,7 +11,7 @@
     "trigger_mode": "event",
     "scenarios": {
       "random_dialog": {"enabled": true, "description": "Pops 'DMS server connection lost' dialog (loops on Cancel)"},
-      "fake_freeze": {"enabled": true, "description": "Freezes all widgets for 3-10 seconds"},
+      "fake_freeze": {"enabled": true, "description": "Hangs the whole app for 3-10 seconds"},
       "session_timeout": {"enabled": true, "description": "Shows session expired, optionally logs out"},
       "unexpected_save": {"enabled": true, "description": "Shows spurious 'Record saved' message"},
       "critical_error": {"enabled": true, "description": "Massive red ERROR popup with fake stack trace"},

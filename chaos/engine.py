@@ -152,7 +152,7 @@ class ChaosEngine:
         self.fire(scenario_key)
         self._schedule_next()
 
-    def fire(self, scenario_key: str):
+    def fire(self, scenario_key: str, **extra):
         """Immediately execute a named scenario."""
         import importlib
 
@@ -163,7 +163,7 @@ class ChaosEngine:
         try:
             mod = importlib.import_module(module_path)
             fn = getattr(mod, func_name)
-            kwargs = {"root": self.root}
+            kwargs = {"root": self.root, **extra}
             if scenario_key == "session_timeout":
                 kwargs["on_logout"] = self.on_logout
             fn(**kwargs)
