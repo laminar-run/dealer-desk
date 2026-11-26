@@ -1,7 +1,11 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dms.db")
+# One database per Windows user, so robot users on one VM never share repair orders.
+_LOCAL = os.environ.get("LOCALAPPDATA") if os.name == "nt" else None
+_DATA_DIR = os.path.join(_LOCAL, "Minicor", "DealerDesk") if _LOCAL else os.path.dirname(os.path.dirname(__file__))
+os.makedirs(_DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(_DATA_DIR, "dms.db")
 _SCHEMA = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 
