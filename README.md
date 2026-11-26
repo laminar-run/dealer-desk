@@ -13,7 +13,7 @@ python main.py                           # launches the Win98 desktop app
 python create_shortcut.py                # (Windows) puts "DealerDesk 98.lnk" on the Desktop
 ```
 
-The database `dms.db` is created and seeded automatically on first launch (idempotent - safe to re-run).
+The database `dms.db` is created and seeded automatically on first launch (idempotent - safe to re-run). On Windows each user has their own file, `%LOCALAPPDATA%\Minicor\DealerDesk\dms.db`, so robot users on one VM never share repair orders. Elsewhere it is in the repository folder.
 
 ## Logins
 
